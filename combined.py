@@ -977,24 +977,18 @@ def find_matches(uid):
 
     try:
 
+        # current user preference
         cursor.execute("""
-
-            SELECT
-                "sharingTypes"
-
+            SELECT "sharingTypes"
             FROM "UserPreference"
-
             WHERE "userId"=%s
-
             ORDER BY id DESC
             LIMIT 1
-
         """, (uid,))
 
         current = cursor.fetchone()
 
         if not current:
-
             print("❌ Complete roommate form first")
             return
 
@@ -1009,16 +1003,16 @@ def find_matches(uid):
         if not isinstance(current_data, dict):
             current_data = {}
 
+        # 🔥 IMPORTANT CHANGE: join User table to get name/mobile
         cursor.execute("""
-
-            SELECT
-                "userId",
-                "sharingTypes"
-
-            FROM "UserPreference"
-
-            WHERE "userId"!=%s
-
+            SELECT 
+                u.id,
+                u.name,
+                u.mobile,
+                p."sharingTypes"
+            FROM "UserPreference" p
+            JOIN "User" u ON u.id = p."userId"
+            WHERE u.id != %s
         """, (uid,))
 
         others = cursor.fetchall()
@@ -1030,7 +1024,9 @@ def find_matches(uid):
         for row in others:
 
             other_uid = row[0]
-            other_data = row[1]
+            name = row[1]
+            mobile = row[2]
+            other_data = row[3]
 
             if isinstance(other_data, str):
                 other_data = json.loads(other_data)
@@ -1044,9 +1040,6 @@ def find_matches(uid):
             score = 0
 
             if current_data.get("sleepTiming") == other_data.get("sleepTiming"):
-                score += 2
-
-            if current_data.get("cleanliness") == other_data.get("cleanliness"):
                 score += 2
 
             if current_data.get("foodHabit") == other_data.get("foodHabit"):
@@ -1063,8 +1056,10 @@ def find_matches(uid):
                 found = True
 
                 print("--------------------------------")
+                print("Name   :", name)
+                print("Mobile :", mobile)
                 print("User ID:", other_uid)
-                print("Compatibility Score:", score)
+                print("Score  :", score)
 
                 if score >= 8:
                     print("Prediction: 🌟 Low conflict match")
@@ -1076,13 +1071,10 @@ def find_matches(uid):
                     print("Prediction: 🎉 Party-friendly group")
 
         if not found:
-
             print("❌ No compatible roommates found")
 
     except Exception as e:
-
         conn.rollback()
-
         print("❌ Match Error")
         print(e)
 # =========================
@@ -1170,12 +1162,12 @@ while True:
 
             message(uid)
             continue
-    if lower_msg == "roommate":
+    if "roomate" in lower_msg:
 
         roommate_preferences(uid)
 
         continue
-    if lower_msg == "find matches":
+    if "find matches" in lower_msg:
 
         find_matches(uid)
 
