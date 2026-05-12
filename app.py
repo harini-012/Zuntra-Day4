@@ -1,12 +1,18 @@
 import os
 import json
 import psycopg2
+import requests
+
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 from groq import Groq
 from datetime import datetime
+
 import cloudinary
 import cloudinary.uploader
+
+from pinecone import Pinecone
+from sentence_transformers import SentenceTransformer
 
 # =========================================
 # LOAD ENV
@@ -35,6 +41,22 @@ cloudinary.config(
 )
 
 # =========================================
+# PINECONE
+# =========================================
+pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
+index = pc.Index(os.getenv("PINECONE_INDEX"))
+
+# =========================================
+# EMBEDDING MODEL
+# =========================================
+embed_model = SentenceTransformer(
+    "BAAI/bge-large-en-v1.5"
+)
+
+def create_embedding(text):
+    return embed_model.encode(text).tolist()
+
+# =========================================
 # DATABASE
 # =========================================
 conn = psycopg2.connect(
@@ -44,11 +66,6 @@ conn = psycopg2.connect(
 
 conn.autocommit = True
 cursor = conn.cursor()
-
-# =========================================
-# CHAT HISTORY
-# =========================================
-history = []
 
 # =========================================
 # SAVE CHAT
@@ -82,6 +99,127 @@ def save_chat(uid, role, content):
         print(e)
 
 # =========================================
+# MCP CLIENT
+# =========================================
+def call_mcp_tool(tool, payload):
+
+    try:
+
+        response = requests.post(
+            f"http://127.0.0.1:5000/mcp/{tool}",
+            json=payload,
+            timeout=20
+        )
+
+        return response.json()
+
+    except Exception as e:
+
+        print("MCP ERROR:", e)
+
+        return {
+            "matches": []
+        }
+
+# =========================================
+# MCP TOOL
+# =========================================
+
+@app.route("/mcp/search-properties", methods=["POST"])
+def mcp_search_properties():
+
+    print("🔥 MCP SEARCH TOOL EXECUTED")
+
+    try:
+
+        data = request.json
+
+        query = data.get("query", "")
+
+        vector = create_embedding(query)
+
+        results = index.query(
+            vector=vector,
+            top_k=5,
+            include_metadata=True,
+            filter={
+                "type": "property"
+            }
+        )
+
+        matches = []
+
+        for m in results.get("matches", []):
+
+            matches.append({
+                "id": m.get("id"),
+                "score": float(m.get("score", 0)),
+                "metadata": m.get("metadata", {})
+            })
+
+        return jsonify({
+            "matches": matches
+        })
+
+    except Exception as e:
+
+        print("MCP SEARCH ERROR:", e)
+
+        return jsonify({
+            "error": str(e),
+            "matches": []
+        }), 500
+
+# =========================================
+# MCP DB TOOL
+# =========================================
+@app.route("/mcp/get-properties-by-city", methods=["POST"])
+def mcp_get_properties_by_city():
+
+    print("🔥 MCP DB TOOL EXECUTED")
+
+    try:
+
+        data = request.json
+
+        city = data.get("city")
+
+        cursor.execute("""
+            SELECT
+                id,
+                city,
+                locality,
+                "propertyName",
+                "propertyType"
+            FROM "Property"
+            WHERE LOWER(city)=LOWER(%s)
+        """, (city,))
+
+        rows = cursor.fetchall()
+
+        properties = []
+
+        for r in rows:
+
+            properties.append({
+                "propertyId": r[0],
+                "city": r[1],
+                "locality": r[2],
+                "propertyName": r[3],
+                "propertyType": r[4]
+            })
+
+        return jsonify({
+            "properties": properties
+        })
+
+    except Exception as e:
+
+        return jsonify({
+            "error": str(e)
+        }), 500
+
+# =========================================
 # REGISTER
 # =========================================
 @app.route("/register", methods=["POST"])
@@ -91,13 +229,9 @@ def register():
 
         data = request.json
 
-        mobile = data["mobile"]
-        name = data["name"]
-        city = data["city"]
-
         cursor.execute(
             'SELECT id FROM "User" WHERE mobile=%s',
-            (mobile,)
+            (data["mobile"],)
         )
 
         user = cursor.fetchone()
@@ -126,9 +260,9 @@ def register():
             )
             RETURNING id
         """, (
-            mobile,
-            name,
-            city
+            data["mobile"],
+            data["name"],
+            data["city"]
         ))
 
         uid = cursor.fetchone()[0]
@@ -176,6 +310,7 @@ def add_property():
                 %s,%s,%s,%s,%s,
                 NOW(),NOW()
             )
+            RETURNING id
         """, (
             data["userId"],
             data["city"],
@@ -189,8 +324,37 @@ def add_property():
             data.get("parking")
         ))
 
+        property_id = cursor.fetchone()[0]
+
+        # =====================================
+        # VECTOR STORE INSERT
+        # =====================================
+
+        vector_text = f"""
+        Property Name: {data['propertyName']}
+        City: {data['city']}
+        Locality: {data['locality']}
+        Property Type: {data['propertyType']}
+        """
+
+        vector = create_embedding(vector_text)
+
+        index.upsert(vectors=[{
+            "id": str(property_id),
+            "values": vector,
+            "metadata": {
+                "type": "property",
+                "propertyId": property_id,
+                "propertyName": data["propertyName"],
+                "city": data["city"],
+                "locality": data["locality"],
+                "propertyType": data["propertyType"]
+            }
+        }])
+
         return jsonify({
-            "message": "property added"
+            "message": "property added",
+            "propertyId": property_id
         })
 
     except Exception as e:
@@ -428,9 +592,6 @@ def matches(uid):
 
     try:
 
-        # =====================================
-        # GET CURRENT USER PREFERENCES
-        # =====================================
         cursor.execute("""
             SELECT "sharingTypes"
             FROM "UserPreference"
@@ -445,25 +606,22 @@ def matches(uid):
 
             return jsonify({
                 "error": "preferences not found"
-            }), 404
+            })
 
         current_data = current[0]
 
-        # =====================================
-        # SAFE JSON CONVERSION
-        # =====================================
+        # Convert JSON string safely
         if isinstance(current_data, str):
             current_data = json.loads(current_data)
 
-        if isinstance(current_data, list):
-            current_data = current_data[0]
-
+        # Ensure dictionary
         if not isinstance(current_data, dict):
-            current_data = {}
+            return jsonify({
+                "error": "invalid current user preferences format"
+            }), 400
 
-        # =====================================
-        # GET OTHER USERS
-        # =====================================
+        rows = []
+
         cursor.execute("""
             SELECT
                 u.id,
@@ -480,49 +638,33 @@ def matches(uid):
 
         results = []
 
-        # =====================================
-        # MATCH CALCULATION
-        # =====================================
         for row in rows:
 
             other_data = row[3]
 
-            # SAFE JSON CONVERSION
             if isinstance(other_data, str):
                 other_data = json.loads(other_data)
-
-            if isinstance(other_data, list):
-                other_data = other_data[0]
 
             if not isinstance(other_data, dict):
                 continue
 
             score = 0
 
-            if current_data.get("sleepTiming") == other_data.get("sleepTiming"):
-                score += 2
+            fields = [
+                "sleepTiming",
+                "foodHabit",
+                "smoking",
+                "drinking",
+                "occupation",
+                "petFriendly",
+                "cleaningFrequency"
+            ]
 
-            if current_data.get("foodHabit") == other_data.get("foodHabit"):
-                score += 2
+            for field in fields:
 
-            if current_data.get("smoking") == other_data.get("smoking"):
-                score += 2
+                if current_data.get(field) == other_data.get(field):
+                    score += 2
 
-            if current_data.get("drinking") == other_data.get("drinking"):
-                score += 2
-
-            if current_data.get("occupation") == other_data.get("occupation"):
-                score += 2
-
-            if current_data.get("petFriendly") == other_data.get("petFriendly"):
-                score += 2
-
-            if current_data.get("cleaningFrequency") == other_data.get("cleaningFrequency"):
-                score += 2
-
-            # =====================================
-            # ADD MATCH
-            # =====================================
             if score >= 5:
 
                 results.append({
@@ -532,9 +674,6 @@ def matches(uid):
                     "score": score
                 })
 
-        # =====================================
-        # SORT MATCHES
-        # =====================================
         results.sort(
             key=lambda x: x["score"],
             reverse=True
@@ -558,9 +697,6 @@ def generate_ad():
 
         data = request.json
 
-        property_id = data["propertyId"]
-        image_path = data["imagePath"]
-
         cursor.execute("""
             SELECT
                 city,
@@ -570,7 +706,7 @@ def generate_ad():
                 parking
             FROM "Property"
             WHERE id=%s
-        """, (property_id,))
+        """, (data["propertyId"],))
 
         prop = cursor.fetchone()
 
@@ -580,7 +716,9 @@ def generate_ad():
                 "error": "property not found"
             })
 
-        upload = cloudinary.uploader.upload(image_path)
+        upload = cloudinary.uploader.upload(
+            data["imagePath"]
+        )
 
         image_url = upload["secure_url"]
 
@@ -651,10 +789,11 @@ def move_in(pid):
 
         property_type = str(p[3]).lower()
 
-        suggestions = []
-
-        suggestions.append("Deep clean before moving")
-        suggestions.append(f"Check locality {p[1]}, {p[0]}")
+        suggestions = [
+            "Deep clean before moving",
+            f"Check locality {p[1]}, {p[0]}",
+            "Arrange electricity & water setup"
+        ]
 
         if "pg" in property_type:
             suggestions.append("Check WiFi and shared washroom")
@@ -679,7 +818,7 @@ def move_in(pid):
         }), 500
 
 # =========================================
-# AI CHAT
+# AI CHAT WITH MCP
 # =========================================
 @app.route("/chat", methods=["POST"])
 def chat():
@@ -690,33 +829,49 @@ def chat():
 
         uid = data["userId"]
         msg = data["message"]
-        city = data.get("city", "Chennai")
 
         save_chat(uid, "user", msg)
 
-        cursor.execute("""
-            SELECT
-                id,
-                city,
-                locality,
-                "propertyName",
-                "propertyType"
-            FROM "Property"
-            WHERE LOWER(city)=LOWER(%s)
-        """, (city,))
+        # =====================================
+        # MCP SEARCH TOOL CALL
+        # =====================================
 
-        props = cursor.fetchall()
+        results = call_mcp_tool(
+            "search-properties",
+            {
+                "query": msg
+            }
+        )
 
-        context = "\n".join([
-            f"""
-ID: {p[0]}
-City: {p[1]}
-Locality: {p[2]}
-Name: {p[3]}
-Type: {p[4]}
+        print("MCP RESULTS:", results)
+
+        # =====================================
+        # BUILD CONTEXT
+        # =====================================
+
+        context = ""
+
+        for m in results.get("matches", []):
+
+            meta = m.get("metadata", {})
+
+            context += f"""
+Property: {meta.get('propertyName')}
+City: {meta.get('city')}
+Locality: {meta.get('locality')}
+Type: {meta.get('propertyType')}
 """
-            for p in props
-        ])
+
+        # =====================================
+        # FALLBACK IF NO RESULTS
+        # =====================================
+
+        if context.strip() == "":
+            context = "No matching properties found."
+
+        # =====================================
+        # AI RESPONSE
+        # =====================================
 
         res = client.chat.completions.create(
             model="llama-3.1-8b-instant",
@@ -729,15 +884,22 @@ Type: {p[4]}
 You are a real estate chatbot.
 
 Rules:
-- Use only given property data
+- Use ONLY given property data
 - Keep answers short
-- No hallucinations
+- If no properties found, say no matching properties found
+- Never hallucinate fake properties
 """
                 },
 
                 {
                     "role": "user",
-                    "content": msg + "\n\nProperties:\n" + context
+                    "content": f"""
+User Query:
+{msg}
+
+Property Data:
+{context}
+"""
                 }
             ]
         )
@@ -747,10 +909,13 @@ Rules:
         save_chat(uid, "assistant", reply)
 
         return jsonify({
-            "reply": reply
+            "reply": reply,
+            "context": context
         })
 
     except Exception as e:
+
+        print("CHAT ERROR:", e)
 
         return jsonify({
             "error": str(e)
