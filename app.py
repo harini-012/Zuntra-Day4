@@ -11,7 +11,7 @@ from datetime import datetime
 
 import cloudinary
 import cloudinary.uploader
-
+from langdetect import detect
 from pinecone import Pinecone
 from sentence_transformers import SentenceTransformer
 
@@ -68,12 +68,28 @@ conn = psycopg2.connect(
 
 conn.autocommit = True
 cursor = conn.cursor()
+def detect_language(text):
+    try:
+        lang = detect(text)
+
+        if lang == "ta":
+            return "TAMIL"
+        elif lang == "hi":
+            return "HINDI"
+        elif lang == "kn":
+            return "KANNADA"
+        elif lang == "te":
+            return "TELUGU"
+        else:
+            return "ENGLISH"
+    except:
+        return "ENGLISH"
 
 # =========================================
 # SAVE CHAT
 # =========================================
 def save_chat(uid, role, content):
-
+    
     try:
 
         cursor.execute("""
@@ -763,6 +779,7 @@ Contact Number: {prop[6]}
 Rules:
 - Professional tone
 - Attractive formatting
+-Dont generate email
 - Mention locality
 - Mention contact information clearly
 - Keep advertisement clean and short
@@ -864,6 +881,7 @@ def move_in(pid):
 # =========================================
 @app.route("/chat", methods=["POST"])
 def chat():
+    
 
     try:
 
@@ -871,7 +889,7 @@ def chat():
 
         uid = data["userId"]
         msg = data["message"]
-
+        user_language = detect_language(msg)
         save_chat(uid, "user", msg)
 
         # =====================================
@@ -921,16 +939,18 @@ Type: {meta.get('propertyType')}
             messages=[
 
                 {
-                    "role": "system",
-                    "content": """
+                     "role": "system",
+    "content": f"""
 You are a real estate chatbot.
 
-Rules:
-- Use ONLY given property data
-- Keep answers short
-- If no properties found, say no matching properties found
-- Never hallucinate fake properties
-"""
+IMPORTANT RULES:
+- Respond ONLY in the user's language.
+- Allowed languages: English, Tamil, Kannada, Hindi, Telugu
+- Detected user language: {user_language}
+- If user writes mixed language, still respond in main detected language.
+- Use ONLY given property data.
+- Keep answers short.
+- Never hallucinate properties"""
                 },
 
                 {
@@ -938,7 +958,8 @@ Rules:
                     "content": f"""
 User Query:
 {msg}
-
+Language:
+{user_language}
 Property Data:
 {context}
 """
