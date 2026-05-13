@@ -8,6 +8,8 @@ from dotenv import load_dotenv
 from groq import Groq
 from flask_cors import CORS
 from datetime import datetime
+from gtts import gTTS
+import uuid
 
 import cloudinary
 import cloudinary.uploader
@@ -68,6 +70,97 @@ conn = psycopg2.connect(
 
 conn.autocommit = True
 cursor = conn.cursor()
+VOICE_LANG_MAP = {
+    "ENGLISH": "en",
+    "HINDI": "hi",
+    "TAMIL": "ta",
+    "TELUGU": "te",
+    "KANNADA": "kn"
+}
+@app.route("/voice-reply", methods=["POST"])
+def voice_reply():
+
+    try:
+        data = request.json
+
+        uid = data["userId"]
+        msg = data["message"]
+
+        user_language = detect_language(msg)
+        save_chat(uid, "user", msg)
+
+        # reuse your MCP + context logic
+        results = call_mcp_tool("search-properties", {"query": msg})
+
+        context = ""
+        for m in results.get("matches", []):
+            meta = m.get("metadata", {})
+            context += f"""
+Property: {meta.get('propertyName')}
+City: {meta.get('city')}
+Locality: {meta.get('locality')}
+Type: {meta.get('propertyType')}
+"""
+
+        if context.strip() == "":
+            context = "No matching properties found."
+
+        res = client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            temperature=0.2,
+            messages=[
+                {
+                    "role": "system",
+                    "content": f"""
+You are a real estate chatbot.
+Respond ONLY in user's language: {user_language}
+Keep it short and natural.
+"""
+                },
+                {
+                    "role": "user",
+                    "content": f"""
+User Query:
+{msg}
+
+Property Data:
+{context}
+"""
+                }
+            ]
+        )
+
+        reply = res.choices[0].message.content
+        save_chat(uid, "assistant", reply)
+
+        # convert language
+        lang_code = VOICE_LANG_MAP.get(user_language, "en")
+
+        audio_url = generate_voice(reply, lang_code)
+
+        return jsonify({
+            "reply": reply,
+            "audio": audio_url,
+            "language": user_language
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+def generate_voice(text, lang_code="en"):
+    try:
+        filename = f"voice_{uuid.uuid4()}.mp3"
+        path = os.path.join("static", filename)
+
+        os.makedirs("static", exist_ok=True)
+
+        tts = gTTS(text=text, lang=lang_code)
+        tts.save(path)
+
+        return f"/static/{filename}"
+
+    except Exception as e:
+        print("VOICE ERROR:", e)
+        return None
 def detect_language(text):
     try:
         lang = detect(text)
