@@ -6,6 +6,7 @@ import requests
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 from groq import Groq
+from flask_cors import CORS
 from datetime import datetime
 
 import cloudinary
@@ -23,6 +24,7 @@ load_dotenv()
 # FLASK
 # =========================================
 app = Flask(__name__)
+CORS(app)
 
 # =========================================
 # GROQ
@@ -691,36 +693,60 @@ def matches(uid):
 # GENERATE ADVERTISEMENT
 # =========================================
 @app.route("/generate-ad", methods=["POST"])
+# =========================================
+# GENERATE ADVERTISEMENT
+# =========================================
+@app.route("/generate-ad", methods=["POST"])
 def generate_ad():
 
     try:
 
         data = request.json
 
+        # =====================================
+        # FETCH PROPERTY + OWNER DETAILS
+        # =====================================
+
         cursor.execute("""
             SELECT
-                city,
-                locality,
-                "propertyName",
-                "propertyType",
-                parking
-            FROM "Property"
-            WHERE id=%s
+                p.city,
+                p.locality,
+                p."propertyName",
+                p."propertyType",
+                p.parking,
+                u.name,
+                u.mobile
+            FROM "Property" p
+            JOIN "User" u
+            ON p."userId" = u.id
+            WHERE p.id=%s
         """, (data["propertyId"],))
 
         prop = cursor.fetchone()
 
+        # =====================================
+        # PROPERTY NOT FOUND
+        # =====================================
+
         if not prop:
 
             return jsonify({
-                "error": "property not found"
-            })
+                "error": "No property found"
+            }), 404
+
+        # =====================================
+        # CLOUDINARY IMAGE
+        # =====================================
 
         upload = cloudinary.uploader.upload(
             data["imagePath"]
         )
 
         image_url = upload["secure_url"]
+
+        # =====================================
+        # AI PROMPT
+        # =====================================
 
         prompt = f"""
 Create a professional real estate advertisement.
@@ -731,11 +757,20 @@ Locality: {prop[1]}
 Property Type: {prop[3]}
 Parking: {prop[4]}
 
+Owner Name: {prop[5]}
+Contact Number: {prop[6]}
+
 Rules:
 - Professional tone
-- Short advertisement
+- Attractive formatting
 - Mention locality
+- Mention contact information clearly
+- Keep advertisement clean and short
 """
+
+        # =====================================
+        # GROQ AI
+        # =====================================
 
         res = client.chat.completions.create(
             model="llama-3.1-8b-instant",
@@ -750,9 +785,17 @@ Rules:
 
         ad = res.choices[0].message.content
 
+        # =====================================
+        # RESPONSE
+        # =====================================
+
         return jsonify({
+
             "advertisement": ad,
-            "imageUrl": image_url
+            "imageUrl": image_url,
+            "ownerName": prop[5],
+            "mobile": prop[6]
+
         })
 
     except Exception as e:
@@ -760,7 +803,6 @@ Rules:
         return jsonify({
             "error": str(e)
         }), 500
-
 # =========================================
 # MOVE-IN ASSISTANT
 # =========================================
