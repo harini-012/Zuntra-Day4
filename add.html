@@ -1,10 +1,16 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
+
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 
-  <title>Real Estate AI Chatbot</title>
+  <title>Real Estate AI Assistant</title>
+
+  <!-- JSPDF -->
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
   <style>
 
@@ -34,8 +40,6 @@
       box-shadow:0 5px 20px rgba(0,0,0,0.15);
     }
 
-    /* HEADER */
-
     .chat-header{
       background:#007bff;
       color:white;
@@ -44,8 +48,6 @@
       font-size:20px;
       font-weight:bold;
     }
-
-    /* CHAT AREA */
 
     .chat-body{
       flex:1;
@@ -89,8 +91,6 @@
       border-bottom-left-radius:5px;
     }
 
-    /* IMAGE */
-
     .property-image{
       width:100%;
       border-radius:10px;
@@ -98,8 +98,6 @@
       height:220px;
       object-fit:cover;
     }
-
-    /* CONTACT */
 
     .contact-box{
       margin-top:15px;
@@ -119,8 +117,6 @@
       color:#444;
       font-size:14px;
     }
-
-    /* INPUT AREA */
 
     .chat-footer{
       padding:15px;
@@ -146,10 +142,19 @@
       color:white;
       font-size:15px;
       cursor:pointer;
+      margin-top:8px;
     }
 
     button:hover{
       background:#0056b3;
+    }
+
+    .download-btn{
+      background:#28a745;
+    }
+
+    .download-btn:hover{
+      background:#1f7d36;
     }
 
     .loading{
@@ -160,6 +165,7 @@
     }
 
   </style>
+
 </head>
 
 <body>
@@ -170,13 +176,16 @@
 
     <div class="chat-header">
 
-      Real Estate AI Assistant
+      🏠 Real Estate AI Assistant
 
     </div>
 
     <!-- CHAT BODY -->
 
-    <div class="chat-body" id="chatBody">
+    <div
+      class="chat-body"
+      id="chatBody"
+    >
 
       <div class="message bot-message">
 
@@ -184,7 +193,7 @@
 
           Hello 👋<br><br>
 
-          Upload a property image and enter Property ID to generate an AI advertisement.
+          Upload property image and enter Property ID to generate AI advertisement.
 
         </div>
 
@@ -214,7 +223,10 @@
 
       </button>
 
-      <div class="loading" id="loading"></div>
+      <div
+        class="loading"
+        id="loading"
+      ></div>
 
     </div>
 
@@ -255,9 +267,7 @@
         loading.innerHTML =
           "Uploading image...";
 
-        // =====================================
         // USER MESSAGE
-        // =====================================
 
         const userDiv =
           document.createElement("div");
@@ -274,13 +284,15 @@
 
         chatBody.appendChild(userDiv);
 
-        // =====================================
-        // CLOUDINARY UPLOAD
-        // =====================================
+        // CLOUDINARY IMAGE UPLOAD
 
-        const formData = new FormData();
+        const formData =
+          new FormData();
 
-        formData.append("file", file);
+        formData.append(
+          "file",
+          file
+        );
 
         formData.append(
           "upload_preset",
@@ -289,15 +301,12 @@
 
         const cloudinaryResponse =
           await fetch(
-
-          "https://api.cloudinary.com/v1_1/dlafd1hxn/image/upload",
-
-          {
-            method:"POST",
-            body:formData
-          }
-
-        );
+            "https://api.cloudinary.com/v1_1/dlafd1hxn/image/upload",
+            {
+              method:"POST",
+              body:formData
+            }
+          );
 
         const cloudinaryData =
           await cloudinaryResponse.json();
@@ -306,42 +315,36 @@
           cloudinaryData.secure_url;
 
         loading.innerHTML =
-          "Generating AI advertisement...";
+          "Generating advertisement...";
 
-        // =====================================
         // BACKEND CALL
-        // =====================================
 
-        const response = await fetch(
+        const response =
+          await fetch(
+            "http://127.0.0.1:5000/generate-ad",
+            {
+              method:"POST",
 
-          "http://127.0.0.1:5000/generate-ad",
+              headers:{
+                "Content-Type":"application/json"
+              },
 
-          {
-            method:"POST",
+              body:JSON.stringify({
 
-            headers:{
-              "Content-Type":"application/json"
-            },
+                propertyId:propertyId,
+                imagePath:imageUrl
 
-            body:JSON.stringify({
+              })
 
-              propertyId:propertyId,
-              imagePath:imageUrl
-
-            })
-
-          }
-
-        );
+            }
+          );
 
         const data =
           await response.json();
 
         loading.innerHTML = "";
 
-        // =====================================
         // ERROR
-        // =====================================
 
         if(data.error){
 
@@ -363,22 +366,14 @@
 
         }
 
-        // =====================================
-        // FORMAT AD
-        // =====================================
+        // FORMAT ADVERTISEMENT
 
         const formattedAd =
           data.advertisement
+          .replace(/\*\*(.*?)\*\*/g,"<b>$1</b>")
+          .replace(/\n/g,"<br><br>");
 
-          .replace(/\*\*(.*?)\*\*/g,
-            "<b>$1</b>")
-
-          .replace(/\n/g,
-            "<br><br>");
-
-        // =====================================
-        // BOT MESSAGE
-        // =====================================
+        // BOT RESPONSE
 
         const botDiv =
           document.createElement("div");
@@ -390,28 +385,40 @@
 
           <div class="bubble">
 
-            ${formattedAd}
+            <div id="adContent">
 
-            <img
-              src="${data.imageUrl}"
-              class="property-image"
-            >
+              ${formattedAd}
 
-            <div class="contact-box">
+              <img
+                src="${data.imageUrl}"
+                class="property-image"
+                id="propertyImage"
+              >
 
-              <h4>Contact Information</h4>
+              <div class="contact-box">
 
-              <p>
-                <b>Owner:</b>
-                ${data.ownerName}
-              </p>
+                <h4>Contact Information</h4>
 
-              <p>
-                <b>Mobile:</b>
-                ${data.mobile}
-              </p>
+                <p id="ownerName">
+                  <b>Owner:</b>
+                  ${data.ownerName}
+                </p>
+
+                <p id="ownerMobile">
+                  <b>Mobile:</b>
+                  ${data.mobile}
+                </p>
+
+              </div>
 
             </div>
+
+            <button
+              class="download-btn"
+              onclick="downloadPDF()"
+            >
+              ⬇ Download PDF
+            </button>
 
           </div>
 
@@ -428,11 +435,139 @@
 
       catch(error){
 
+        console.log(error);
+
         loading.innerHTML = "";
+
+        alert("Server Error");
+
+      }
+
+    }
+
+    // =====================================
+    // DOWNLOAD PDF
+    // =====================================
+
+    async function downloadPDF(){
+
+      try{
+
+        const { jsPDF } =
+          window.jspdf;
+
+        const doc =
+          new jsPDF();
+
+        const adText =
+          document.getElementById("adContent").innerText;
+
+        const owner =
+          document.getElementById("ownerName").innerText;
+
+        const mobile =
+          document.getElementById("ownerMobile").innerText;
+
+        const imageUrl =
+          document.getElementById("propertyImage").src;
+
+        // TITLE
+
+        doc.setFontSize(20);
+
+        doc.text(
+          "Real Estate Advertisement",
+          20,
+          20
+        );
+
+        // AD CONTENT
+
+        doc.setFontSize(12);
+
+        const splitText =
+          doc.splitTextToSize(
+            adText,
+            170
+          );
+
+        doc.text(
+          splitText,
+          20,
+          40
+        );
+
+        // FETCH IMAGE
+
+        const imageData =
+          await fetch(imageUrl)
+          .then(res => res.blob())
+          .then(blob => {
+
+            return new Promise((resolve) => {
+
+              const reader =
+                new FileReader();
+
+              reader.onloadend = () =>
+                resolve(reader.result);
+
+              reader.readAsDataURL(blob);
+
+            });
+
+          });
+
+        // ADD IMAGE
+
+        doc.addImage(
+          imageData,
+          "JPEG",
+          20,
+          120,
+          160,
+          90
+        );
+
+        // CONTACT INFO
+
+        doc.setFontSize(14);
+
+        doc.text(
+          "Contact Information",
+          20,
+          225
+        );
+
+        doc.setFontSize(12);
+
+        doc.text(
+          owner,
+          20,
+          235
+        );
+
+        doc.text(
+          mobile,
+          20,
+          245
+        );
+
+        // SAVE PDF
+
+        doc.save(
+          "property_advertisement.pdf"
+        );
+
+      }
+
+      catch(error){
 
         console.log(error);
 
-        alert("Server Error");
+        alert(
+          "PDF generation failed"
+        );
 
       }
 
@@ -441,4 +576,5 @@
   </script>
 
 </body>
+
 </html>
