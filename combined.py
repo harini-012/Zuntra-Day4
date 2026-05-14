@@ -1,198 +1,203 @@
 import os
 import json
 import psycopg2
+import requests
+
+from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 from groq import Groq
+from flask_cors import CORS
 from datetime import datetime
+from gtts import gTTS
+import uuid
+from flask import Flask, render_template
 import cloudinary
 import cloudinary.uploader
+from langdetect import detect
+from pinecone import Pinecone
+from sentence_transformers import SentenceTransformer
 
-# =========================
-# ENV
-# =========================
+# =========================================
+# LOAD ENV
+# =========================================
 load_dotenv()
 
+# =========================================
+# FLASK
+# =========================================
+app = Flask(__name__)
+CORS(app)
+@app.route("/")
+def home():
+    return render_template("add.html")
+
+# =========================================
+# GROQ
+# =========================================
 client = Groq(
     api_key=os.getenv("GROQ_API_KEY")
 )
 
-# =========================
+# =========================================
 # CLOUDINARY
-# =========================
+# =========================================
 cloudinary.config(
     cloud_name=os.getenv("CLOUDINARY_CLOUD_NAME"),
     api_key=os.getenv("CLOUDINARY_API_KEY"),
     api_secret=os.getenv("CLOUDINARY_API_SECRET")
 )
 
-# =========================
-# DB CONNECTION
-# =========================
+# =========================================
+# PINECONE
+# =========================================
+pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
+index = pc.Index(os.getenv("PINECONE_INDEX"))
+
+# =========================================
+# EMBEDDING MODEL
+# =========================================
+embed_model = SentenceTransformer(
+    "BAAI/bge-large-en-v1.5"
+)
+
+def create_embedding(text):
+    return embed_model.encode(text).tolist()
+
+# =========================================
+# DATABASE
+# =========================================
 conn = psycopg2.connect(
     os.getenv("DATABASE_URL"),
     sslmode="require"
 )
 
+conn.autocommit = True
 cursor = conn.cursor()
-
-# =========================
-# SELLER SCHEMA
-# =========================
-SELLER_SCHEMA = [
-    ("city", str, False),
-    ("locality", str, False),
-    ("street", str, True),
-    ("landmark", str, True),
-    ("latitude", float, True),
-    ("longitude", float, True),
-    ("propertyName", str, False),
-    ("propertyType", str, False),
-    ("parking", str, True),
-]
-
-# =========================
-# AI HISTORY
-# =========================
-history = []
-
-# =========================
-# ROLE
-# =========================
-def select_role():
-
-    while True:
-
-        print("\n1. Buyer")
-        print("2. Seller")
-
-        role = input("Role: ").strip()
-
-        if role == "1":
-            return "buyer"
-
-        elif role == "2":
-            return "seller"
-
-        else:
-            print("❌ Invalid role")
-
-# =========================
-# REGISTER USER
-# =========================
-def register_user():
-
-    # MOBILE
-    while True:
-
-        mobile = input("Mobile: ").strip()
-
-        if mobile == "":
-            print("❌ Mobile required")
-            continue
-
-        if not mobile.isdigit():
-            print("❌ Mobile must contain only numbers")
-            continue
-
-        if len(mobile) != 10:
-            print("❌ Mobile must be 10 digits")
-            continue
-
-        break
-
-    # NAME
-    while True:
-
-        name = input("Name: ").strip()
-
-        if name == "":
-            print("❌ Name required")
-            continue
-
-        if len(name) < 3:
-            print("❌ Name too short")
-            continue
-
-        if not all(c.isalpha() or c.isspace() for c in name):
-            print("❌ Name must contain only letters")
-            continue
-
-        break
-
-    # CITY
-    while True:
-
-        city = input("City: ").strip().title()
-
-        if city == "":
-            print("❌ City required")
-            continue
-
-        if not all(c.isalpha() or c.isspace() for c in city):
-            print("❌ Invalid city")
-            continue
-
-        break
+VOICE_LANG_MAP = {
+    "ENGLISH": "en",
+    "HINDI": "hi",
+    "TAMIL": "ta",
+    "TELUGU": "te",
+    "KANNADA": "kn"
+}
+@app.route("/voice-reply", methods=["POST"])
+def voice_reply():
 
     try:
+        data = request.json
 
-        cursor.execute(
-            'SELECT id FROM "User" WHERE mobile=%s',
-            (mobile,)
+        uid = data["userId"]
+        msg = data["message"]
+
+        user_language = detect_language(msg)
+        save_chat(uid, "user", msg)
+
+        # reuse your MCP + context logic
+        results = call_mcp_tool("search-properties", {"query": msg})
+
+        context = ""
+        for m in results.get("matches", []):
+            meta = m.get("metadata", {})
+            context += f"""
+Property: {meta.get('propertyName')}
+City: {meta.get('city')}
+Locality: {meta.get('locality')}
+Type: {meta.get('propertyType')}
+"""
+
+        if context.strip() == "":
+            context = "No matching properties found."
+
+        res = client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            temperature=0.2,
+            messages=[
+                {
+                    "role": "system",
+                    "content": f"""
+You are a real estate assistant.
+
+STRICT RULE:
+You MUST respond ONLY in this language: {user_language}
+
+ABSOLUTE RULES:
+- Do NOT use English unless language is ENGLISH
+- Do NOT mix languages
+- If language is TAMIL, respond fully in Tamil script
+- If HINDI, respond in Devanagari script
+- If TELUGU/KANNADA, use proper native script
+- Keep response short (2–4 lines max)
+
+Detected language: {user_language}
+"""
+                },
+                {
+                    "role": "user",
+                    "content": f"""
+User Query:
+{msg}
+
+Property Data:
+{context}
+"""
+                }
+            ]
         )
 
-        user = cursor.fetchone()
+        reply = res.choices[0].message.content
+        save_chat(uid, "assistant", reply)
 
-        if user:
-            print("✅ Existing User Login")
-            return user[0], city
+        # convert language
+        lang_code = VOICE_LANG_MAP.get(user_language, "en")
 
-        cursor.execute("""
-            INSERT INTO "User"
-            (
-                mobile,
-                name,
-                city,
-                "createdAt"
-            )
-            VALUES
-            (
-                %s,
-                %s,
-                %s,
-                NOW()
-            )
-            RETURNING id
-        """, (
-            mobile,
-            name,
-            city
-        ))
+        audio_url = generate_voice(reply, lang_code)
 
-        uid = cursor.fetchone()[0]
-
-        conn.commit()
-
-        print("✅ User Registered")
-
-        return uid, city
+        return jsonify({
+            "reply": reply,
+            "audio": audio_url,
+            "language": user_language
+        })
 
     except Exception as e:
-
-        conn.rollback()
-
-        print("❌ Register Error")
-        print(e)
-
-# =========================
-# SAVE CHAT
-# =========================
-def save_chat(uid, role, content):
-
+        return jsonify({"error": str(e)}), 500
+def generate_voice(text, lang_code="en"):
     try:
+        filename = f"voice_{uuid.uuid4()}.mp3"
+        path = os.path.join("static", filename)
 
-        if content.strip() == "":
-            return
+        os.makedirs("static", exist_ok=True)
+
+        tts = gTTS(text=text, lang=lang_code)
+        tts.save(path)
+
+        return f"/static/{filename}"
+
+    except Exception as e:
+        print("VOICE ERROR:", e)
+        return None
+def detect_language(text):
+    try:
+        lang = detect(text)
+
+        if lang == "ta":
+            return "TAMIL"
+        elif lang == "hi":
+            return "HINDI"
+        elif lang == "kn":
+            return "KANNADA"
+        elif lang == "te":
+            return "TELUGU"
+        else:
+            return "ENGLISH"
+    except:
+        return "ENGLISH"
+
+# =========================================
+# SAVE CHAT
+# =========================================
+def save_chat(uid, role, content):
+    
+    try:
 
         cursor.execute("""
             INSERT INTO "ChatMessage"
@@ -215,21 +220,94 @@ def save_chat(uid, role, content):
             content
         ))
 
-        conn.commit()
+    except Exception as e:
+        print(e)
+
+# =========================================
+# MCP CLIENT
+# =========================================
+def call_mcp_tool(tool, payload):
+
+    try:
+
+        response = requests.post(
+            f"http://127.0.0.1:5000/mcp/{tool}",
+            json=payload,
+            timeout=20
+        )
+
+        return response.json()
 
     except Exception as e:
 
-        conn.rollback()
+        print("MCP ERROR:", e)
 
-        print("❌ Chat Save Error")
-        print(e)
+        return {
+            "matches": []
+        }
 
-# =========================
-# SEARCH PROPERTY
-# =========================
-def search(city):
+# =========================================
+# MCP TOOL
+# =========================================
+
+@app.route("/mcp/search-properties", methods=["POST"])
+def mcp_search_properties():
+
+    print("🔥 MCP SEARCH TOOL EXECUTED")
 
     try:
+
+        data = request.json
+
+        query = data.get("query", "")
+
+        vector = create_embedding(query)
+
+        results = index.query(
+            vector=vector,
+            top_k=5,
+            include_metadata=True,
+            filter={
+                "type": "property"
+            }
+        )
+
+        matches = []
+
+        for m in results.get("matches", []):
+
+            matches.append({
+                "id": m.get("id"),
+                "score": float(m.get("score", 0)),
+                "metadata": m.get("metadata", {})
+            })
+
+        return jsonify({
+            "matches": matches
+        })
+
+    except Exception as e:
+
+        print("MCP SEARCH ERROR:", e)
+
+        return jsonify({
+            "error": str(e),
+            "matches": []
+        }), 500
+
+# =========================================
+# MCP DB TOOL
+# =========================================
+@app.route("/mcp/get-properties-by-city", methods=["POST"])
+def mcp_get_properties_by_city():
+
+    print("🔥 MCP DB TOOL EXECUTED")
+
+    try:
+
+        data = request.json
+
+        city = data.get("city")
 
         cursor.execute("""
             SELECT
@@ -239,171 +317,63 @@ def search(city):
                 "propertyName",
                 "propertyType"
             FROM "Property"
-            WHERE LOWER(TRIM(city))
-            = LOWER(TRIM(%s))
-            ORDER BY id DESC
-            LIMIT 10
+            WHERE LOWER(city)=LOWER(%s)
         """, (city,))
 
-        return cursor.fetchall()
+        rows = cursor.fetchall()
+
+        properties = []
+
+        for r in rows:
+
+            properties.append({
+                "propertyId": r[0],
+                "city": r[1],
+                "locality": r[2],
+                "propertyName": r[3],
+                "propertyType": r[4]
+            })
+
+        return jsonify({
+            "properties": properties
+        })
 
     except Exception as e:
 
-        conn.rollback()
+        return jsonify({
+            "error": str(e)
+        }), 500
 
-        print("❌ Search Error")
-        print(e)
-
-        return []
-
-# =========================
-# VALIDATE PROPERTY
-# =========================
-def validate_property(pid):
+# =========================================
+# REGISTER
+# =========================================
+@app.route("/register", methods=["POST"])
+def register():
 
     try:
+
+        data = request.json
 
         cursor.execute(
-            'SELECT id FROM "Property" WHERE id=%s',
-            (pid,)
+            'SELECT id FROM "User" WHERE mobile=%s',
+            (data["mobile"],)
         )
 
-        return cursor.fetchone() is not None
+        user = cursor.fetchone()
 
-    except Exception as e:
+        if user:
 
-        conn.rollback()
-
-        print("❌ Validation Error")
-        print(e)
-
-        return False
-
-# =========================
-# SAVE VIEW
-# =========================
-def save_view(uid, pid):
-
-    try:
+            return jsonify({
+                "message": "existing user",
+                "userId": user[0]
+            })
 
         cursor.execute("""
-            INSERT INTO "PropertyView"
+            INSERT INTO "User"
             (
-                "userId",
-                "propertyId",
-                "createdAt"
-            )
-            VALUES
-            (
-                %s,
-                %s,
-                NOW()
-            )
-            ON CONFLICT
-            (
-                "userId",
-                "propertyId"
-            )
-            DO NOTHING
-        """, (
-            uid,
-            pid
-        ))
-
-        conn.commit()
-
-    except Exception as e:
-
-        conn.rollback()
-
-        print("❌ View Save Error")
-        print(e)
-
-# =========================
-# LIKE PROPERTY
-# =========================
-def like(uid, pid):
-
-    try:
-
-        if not validate_property(pid):
-            print("❌ Invalid Property ID")
-            return
-
-        cursor.execute("""
-            INSERT INTO "Like"
-            (
-                "userId",
-                "propertyId",
-                "createdAt"
-            )
-            VALUES
-            (
-                %s,
-                %s,
-                NOW()
-            )
-            ON CONFLICT
-            (
-                "userId",
-                "propertyId"
-            )
-            DO NOTHING
-        """, (
-            uid,
-            pid
-        ))
-
-        conn.commit()
-
-        print("❤️ Property Liked")
-
-    except Exception as e:
-
-        conn.rollback()
-
-        print("❌ Like Error")
-        print(e)
-
-# =========================
-# VISIT PROPERTY
-# =========================
-def visit(uid, pid):
-
-    try:
-
-        if not validate_property(pid):
-            print("❌ Invalid Property ID")
-            return
-
-        t = input(
-            "Visit Date & Time (YYYY-MM-DD HH:MM): "
-        ).strip()
-
-        try:
-
-            visit_time = datetime.strptime(
-                t,
-                "%Y-%m-%d %H:%M"
-            )
-
-        except ValueError:
-
-            print("❌ Invalid format")
-            return
-
-        if visit_time <= datetime.now():
-
-            print("❌ Past visit not allowed")
-            return
-
-        cursor.execute("""
-            INSERT INTO "Visit"
-            (
-                "userId",
-                "propertyId",
-                "visitDateTime",
-                status,
+                mobile,
+                name,
+                city,
                 "createdAt"
             )
             VALUES
@@ -411,167 +381,37 @@ def visit(uid, pid):
                 %s,
                 %s,
                 %s,
-                'pending',
                 NOW()
             )
+            RETURNING id
         """, (
-            uid,
-            pid,
-            visit_time
+            data["mobile"],
+            data["name"],
+            data["city"]
         ))
 
-        conn.commit()
+        uid = cursor.fetchone()[0]
 
-        print("📅 Visit booked")
+        return jsonify({
+            "message": "registered",
+            "userId": uid
+        })
 
     except Exception as e:
 
-        conn.rollback()
+        return jsonify({
+            "error": str(e)
+        }), 500
 
-        print("❌ Visit Error")
-        print(e)
-
-# =========================
-# MESSAGE OWNER
-# =========================
-def message(uid):
-
-    try:
-
-        pid_input = input("Property ID: ").strip()
-
-        if not pid_input.isdigit():
-            print("❌ Property ID must be number")
-            return
-
-        pid = int(pid_input)
-
-        if not validate_property(pid):
-            print("❌ Invalid Property ID")
-            return
-
-        msg = input("Message: ").strip()
-
-        if msg == "":
-            print("❌ Message required")
-            return
-
-        if len(msg) > 500:
-            print("❌ Message too long")
-            return
-
-        cursor.execute(
-            'SELECT "userId" FROM "Property" WHERE id=%s',
-            (pid,)
-        )
-
-        owner = cursor.fetchone()
-
-        if not owner:
-            print("❌ Owner not found")
-            return
-
-        receiver_id = owner[0]
-
-        if receiver_id == uid:
-            print("❌ Cannot message your own property")
-            return
-
-        cursor.execute("""
-            INSERT INTO "Message"
-            (
-                "senderId",
-                "receiverId",
-                "propertyId",
-                "message",
-                "createdAt"
-            )
-            VALUES
-            (
-                %s,
-                %s,
-                %s,
-                %s,
-                NOW()
-            )
-        """, (
-            uid,
-            receiver_id,
-            pid,
-            msg
-        ))
-
-        conn.commit()
-
-        print("💬 Message Sent")
-
-    except Exception as e:
-
-        conn.rollback()
-
-        print("❌ Message Error")
-        print(e)
-
-# =========================
+# =========================================
 # ADD PROPERTY
-# =========================
-def add_property(uid):
-
-    print("\n🏠 SELLER FORM")
-
-    data = {}
-
-    for field, typ, optional in SELLER_SCHEMA:
-
-        while True:
-
-            val = input(f"{field}: ").strip()
-
-            # OPTIONAL
-            if optional and val == "":
-                data[field] = None
-                break
-
-            # REQUIRED
-            if val == "":
-                print(f"❌ {field} required")
-                continue
-
-            try:
-
-                if typ == float:
-
-                    number = float(val)
-
-                    if field == "latitude":
-
-                        if number < -90 or number > 90:
-                            print("❌ Invalid latitude")
-                            continue
-
-                    if field == "longitude":
-
-                        if number < -180 or number > 180:
-                            print("❌ Invalid longitude")
-                            continue
-
-                    data[field] = number
-
-                else:
-
-                    if len(val) < 2:
-                        print(f"❌ Invalid {field}")
-                        continue
-
-                    data[field] = val
-
-                break
-
-            except:
-
-                print(f"❌ Invalid {field}")
+# =========================================
+@app.route("/add-property", methods=["POST"])
+def add_property():
 
     try:
+
+        data = request.json
 
         cursor.execute("""
             INSERT INTO "Property"
@@ -595,36 +435,68 @@ def add_property(uid):
                 %s,%s,%s,%s,%s,
                 NOW(),NOW()
             )
+            RETURNING id
         """, (
-            uid,
+            data["userId"],
             data["city"],
             data["locality"],
-            data["street"],
-            data["landmark"],
-            data["latitude"],
-            data["longitude"],
+            data.get("street"),
+            data.get("landmark"),
+            data.get("latitude"),
+            data.get("longitude"),
             data["propertyName"],
             data["propertyType"],
-            data["parking"]
+            data.get("parking")
         ))
 
-        conn.commit()
+        property_id = cursor.fetchone()[0]
 
-        print("✅ Property Added")
+        # =====================================
+        # VECTOR STORE INSERT
+        # =====================================
+
+        vector_text = f"""
+        Property Name: {data['propertyName']}
+        City: {data['city']}
+        Locality: {data['locality']}
+        Property Type: {data['propertyType']}
+        """
+
+        vector = create_embedding(vector_text)
+
+        index.upsert(vectors=[{
+            "id": str(property_id),
+            "values": vector,
+            "metadata": {
+                "type": "property",
+                "propertyId": property_id,
+                "propertyName": data["propertyName"],
+                "city": data["city"],
+                "locality": data["locality"],
+                "propertyType": data["propertyType"]
+            }
+        }])
+
+        return jsonify({
+            "message": "property added",
+            "propertyId": property_id
+        })
 
     except Exception as e:
 
-        conn.rollback()
+        return jsonify({
+            "error": str(e)
+        }), 500
 
-        print("❌ Property Add Error")
-        print(e)
-
-# =========================
-# GENERATE PROPERTY AD
-# =========================
-def generate_ad():
+# =========================================
+# PROPERTY SEARCH
+# =========================================
+@app.route("/properties", methods=["GET"])
+def properties():
 
     try:
+
+        city = request.args.get("city")
 
         cursor.execute("""
             SELECT
@@ -634,63 +506,370 @@ def generate_ad():
                 "propertyName",
                 "propertyType"
             FROM "Property"
+            WHERE LOWER(city)=LOWER(%s)
+        """, (city,))
+
+        rows = cursor.fetchall()
+
+        return jsonify([
+            {
+                "propertyId": r[0],
+                "city": r[1],
+                "locality": r[2],
+                "propertyName": r[3],
+                "propertyType": r[4]
+            }
+            for r in rows
+        ])
+
+    except Exception as e:
+
+        return jsonify({
+            "error": str(e)
+        }), 500
+
+# =========================================
+# LIKE PROPERTY
+# =========================================
+@app.route("/like", methods=["POST"])
+def like():
+
+    try:
+
+        data = request.json
+
+        cursor.execute("""
+            INSERT INTO "Like"
+            (
+                "userId",
+                "propertyId",
+                "createdAt"
+            )
+            VALUES
+            (
+                %s,
+                %s,
+                NOW()
+            )
+            ON CONFLICT DO NOTHING
+        """, (
+            data["userId"],
+            data["propertyId"]
+        ))
+
+        return jsonify({
+            "message": "property liked"
+        })
+
+    except Exception as e:
+
+        return jsonify({
+            "error": str(e)
+        }), 500
+
+# =========================================
+# VISIT BOOKING
+# =========================================
+@app.route("/visit", methods=["POST"])
+def visit():
+
+    try:
+
+        data = request.json
+
+        cursor.execute("""
+            INSERT INTO "Visit"
+            (
+                "userId",
+                "propertyId",
+                "visitDateTime",
+                status,
+                "createdAt"
+            )
+            VALUES
+            (
+                %s,
+                %s,
+                %s,
+                'pending',
+                NOW()
+            )
+        """, (
+            data["userId"],
+            data["propertyId"],
+            data["visitDateTime"]
+        ))
+
+        return jsonify({
+            "message": "visit booked"
+        })
+
+    except Exception as e:
+
+        return jsonify({
+            "error": str(e)
+        }), 500
+
+# =========================================
+# MESSAGE OWNER
+# =========================================
+@app.route("/message", methods=["POST"])
+def message_owner():
+
+    try:
+
+        data = request.json
+
+        cursor.execute(
+            'SELECT "userId" FROM "Property" WHERE id=%s',
+            (data["propertyId"],)
+        )
+
+        owner = cursor.fetchone()
+
+        if not owner:
+
+            return jsonify({
+                "error": "owner not found"
+            })
+
+        receiver_id = owner[0]
+
+        cursor.execute("""
+            INSERT INTO "Message"
+            (
+                "senderId",
+                "receiverId",
+                "propertyId",
+                "message",
+                "createdAt"
+            )
+            VALUES
+            (
+                %s,
+                %s,
+                %s,
+                %s,
+                NOW()
+            )
+        """, (
+            data["senderId"],
+            receiver_id,
+            data["propertyId"],
+            data["message"]
+        ))
+
+        return jsonify({
+            "message": "message sent"
+        })
+
+    except Exception as e:
+
+        return jsonify({
+            "error": str(e)
+        }), 500
+
+# =========================================
+# ROOMMATE PREFERENCES
+# =========================================
+@app.route("/roommate", methods=["POST"])
+def roommate():
+
+    try:
+
+        data = request.json
+
+        cursor.execute("""
+            INSERT INTO "UserPreference"
+            (
+                "userId",
+                "sharingTypes",
+                "createdAt",
+                "updatedAt"
+            )
+            VALUES
+            (
+                %s,
+                %s,
+                NOW(),
+                NOW()
+            )
+        """, (
+            data["userId"],
+            json.dumps(data["preferences"])
+        ))
+
+        return jsonify({
+            "message": "preferences saved"
+        })
+
+    except Exception as e:
+
+        return jsonify({
+            "error": str(e)
+        }), 500
+
+# =========================================
+# FIND MATCHES
+# =========================================
+@app.route("/matches/<int:uid>", methods=["GET"])
+def matches(uid):
+
+    try:
+
+        cursor.execute("""
+            SELECT "sharingTypes"
+            FROM "UserPreference"
+            WHERE "userId"=%s
             ORDER BY id DESC
-        """)
+            LIMIT 1
+        """, (uid,))
 
-        props = cursor.fetchall()
+        current = cursor.fetchone()
 
-        if len(props) == 0:
+        if not current:
 
-            print("❌ No properties found")
-            return
+            return jsonify({
+                "error": "preferences not found"
+            })
 
-        print("\n🏠 AVAILABLE PROPERTIES\n")
+        current_data = current[0]
 
-        for p in props:
+        # Convert JSON string safely
+        if isinstance(current_data, str):
+            current_data = json.loads(current_data)
 
-            print("--------------------------------")
-            print("Property ID :", p[0])
-            print("City        :", p[1])
-            print("Locality    :", p[2])
-            print("Name        :", p[3])
-            print("Type        :", p[4])
+        # Ensure dictionary
+        if not isinstance(current_data, dict):
+            return jsonify({
+                "error": "invalid current user preferences format"
+            }), 400
 
-        pid = input("\nEnter Property ID: ").strip()
-
-        if not pid.isdigit():
-
-            print("❌ Invalid Property ID")
-            return
-
-        pid = int(pid)
+        rows = []
 
         cursor.execute("""
             SELECT
-                city,
-                locality,
-                "propertyName",
-                "propertyType",
-                parking
-            FROM "Property"
-            WHERE id=%s
-        """, (pid,))
+                u.id,
+                u.name,
+                u.mobile,
+                p."sharingTypes"
+            FROM "UserPreference" p
+            JOIN "User" u
+            ON u.id = p."userId"
+            WHERE u.id != %s
+        """, (uid,))
+
+        rows = cursor.fetchall()
+
+        results = []
+
+        for row in rows:
+
+            other_data = row[3]
+
+            if isinstance(other_data, str):
+                other_data = json.loads(other_data)
+
+            if not isinstance(other_data, dict):
+                continue
+
+            score = 0
+
+            fields = [
+                "sleepTiming",
+                "foodHabit",
+                "smoking",
+                "drinking",
+                "occupation",
+                "petFriendly",
+                "cleaningFrequency"
+            ]
+
+            for field in fields:
+
+                if current_data.get(field) == other_data.get(field):
+                    score += 2
+
+            if score >= 5:
+
+                results.append({
+                    "userId": row[0],
+                    "name": row[1],
+                    "mobile": row[2],
+                    "score": score
+                })
+
+        results.sort(
+            key=lambda x: x["score"],
+            reverse=True
+        )
+
+        return jsonify(results)
+
+    except Exception as e:
+
+        return jsonify({
+            "error": str(e)
+        }), 500
+
+# =========================================
+# GENERATE ADVERTISEMENT
+# =========================================
+@app.route("/generate-ad", methods=["POST"])
+# =========================================
+# GENERATE ADVERTISEMENT
+# =========================================
+@app.route("/generate-ad", methods=["POST"])
+def generate_ad():
+
+    try:
+
+        data = request.json
+
+        # =====================================
+        # FETCH PROPERTY + OWNER DETAILS
+        # =====================================
+
+        cursor.execute("""
+            SELECT
+                p.city,
+                p.locality,
+                p."propertyName",
+                p."propertyType",
+                p.parking,
+                u.name,
+                u.mobile
+            FROM "Property" p
+            JOIN "User" u
+            ON p."userId" = u.id
+            WHERE p.id=%s
+        """, (data["propertyId"],))
 
         prop = cursor.fetchone()
 
+        # =====================================
+        # PROPERTY NOT FOUND
+        # =====================================
+
         if not prop:
 
-            print("❌ Property not found")
-            return
+            return jsonify({
+                "error": "No property found"
+            }), 404
 
-        image_path = input("Enter Image Path: ").strip()
+        # =====================================
+        # CLOUDINARY IMAGE
+        # =====================================
 
         upload = cloudinary.uploader.upload(
-            image_path
+            data["imagePath"]
         )
 
         image_url = upload["secure_url"]
 
-        print("\n✅ Image Uploaded Successfully")
+        # =====================================
+        # AI PROMPT
+        # =====================================
 
         prompt = f"""
 Create a professional real estate advertisement.
@@ -701,14 +880,21 @@ Locality: {prop[1]}
 Property Type: {prop[3]}
 Parking: {prop[4]}
 
+Owner Name: {prop[5]}
+Contact Number: {prop[6]}
+
 Rules:
 - Professional tone
-- Short advertisement
+- Attractive formatting
+-Dont generate email
 - Mention locality
-- Mention property type
-- Add attractive ending
-- Do NOT use placeholders
+- Mention contact information clearly
+- Keep advertisement clean and short
 """
+
+        # =====================================
+        # GROQ AI
+        # =====================================
 
         res = client.chat.completions.create(
             model="llama-3.1-8b-instant",
@@ -723,98 +909,136 @@ Rules:
 
         ad = res.choices[0].message.content
 
-        print("\n🏠 GENERATED AD\n")
-        print(ad)
+        # =====================================
+        # RESPONSE
+        # =====================================
 
-        print("\n📸 IMAGE URL")
-        print(image_url)
+        return jsonify({
+
+            "advertisement": ad,
+            "imageUrl": image_url,
+            "ownerName": prop[5],
+            "mobile": prop[6]
+
+        })
 
     except Exception as e:
 
-        print("❌ Generate Ad Error")
-        print(e)
-
-# =========================
-# MOVE IN ASSISTANT
-# =========================
-def move_in_assistant(selected_property):
-
-    suggestions = []
-
-    p = selected_property["data"]
-
-    if not p:
-        return "❌ No property selected"
-
-    city = p[1]
-    locality = p[2]
-    property_type = str(p[4]).lower()
-
-    suggestions.append("🧹 Deep clean before moving in")
-    suggestions.append(f"📍 Location check: {locality}, {city}")
-
-    if "pg" in property_type:
-
-        suggestions.append("🛏️ Check shared washroom and WiFi availability")
-        suggestions.append("🔐 Keep valuables secure")
-        suggestions.append("📋 Ask about visitor rules")
-
-    elif "1bhk" in property_type:
-
-        suggestions.append("🪑 Use compact furniture")
-        suggestions.append("🧺 Plan storage racks")
-        suggestions.append("💡 Check ventilation")
-
-    elif "2bhk" in property_type:
-
-        suggestions.append("🛋️ Plan furniture layout")
-        suggestions.append("📦 Separate boxes room-wise")
-        suggestions.append("✔️ Great for families or roommates")
-
-    elif "3bhk" in property_type:
-
-        suggestions.append("🛏️ Assign rooms before shifting")
-        suggestions.append("📺 Plan appliance placement")
-        suggestions.append("🚚 Use larger transport vehicle")
-
-    elif "villa" in property_type:
-
-        suggestions.append("🌳 Inspect garden area")
-        suggestions.append("🚗 Verify parking security")
-        suggestions.append("💧 Check water system")
-
-    else:
-
-        suggestions.append("🏠 Verify property condition")
-
-    return (
-        "\n🏠 MOVE-IN ASSISTANT\n\n"
-        + "\n".join(["• " + s for s in suggestions])
-    )
-
-# =========================
-# AI CHAT
-# =========================
-def ai(msg, props):
-
-    if len(props) == 0:
-
-        context = "No properties available"
-
-    else:
-
-        context = "\n".join([
-            f"""
-ID: {p[0]}
-City: {p[1]}
-Locality: {p[2]}
-Name: {p[3]}
-Type: {p[4]}
-"""
-            for p in props
-        ])
+        return jsonify({
+            "error": str(e)
+        }), 500
+# =========================================
+# MOVE-IN ASSISTANT
+# =========================================
+@app.route("/move-in/<int:pid>", methods=["GET"])
+def move_in(pid):
 
     try:
+
+        cursor.execute("""
+            SELECT
+                city,
+                locality,
+                "propertyName",
+                "propertyType"
+            FROM "Property"
+            WHERE id=%s
+        """, (pid,))
+
+        p = cursor.fetchone()
+
+        if not p:
+
+            return jsonify({
+                "error": "property not found"
+            })
+
+        property_type = str(p[3]).lower()
+
+        suggestions = [
+            "Deep clean before moving",
+            f"Check locality {p[1]}, {p[0]}",
+            "Arrange electricity & water setup"
+        ]
+
+        if "pg" in property_type:
+            suggestions.append("Check WiFi and shared washroom")
+
+        elif "1bhk" in property_type:
+            suggestions.append("Use compact furniture")
+
+        elif "2bhk" in property_type:
+            suggestions.append("Plan room-wise shifting")
+
+        elif "villa" in property_type:
+            suggestions.append("Inspect parking and garden")
+
+        return jsonify({
+            "moveInSuggestions": suggestions
+        })
+
+    except Exception as e:
+
+        return jsonify({
+            "error": str(e)
+        }), 500
+
+# =========================================
+# AI CHAT WITH MCP
+# =========================================
+@app.route("/chat", methods=["POST"])
+def chat():
+    
+
+    try:
+
+        data = request.json
+
+        uid = data["userId"]
+        msg = data["message"]
+        user_language = detect_language(msg)
+        save_chat(uid, "user", msg)
+
+        # =====================================
+        # MCP SEARCH TOOL CALL
+        # =====================================
+
+        results = call_mcp_tool(
+            "search-properties",
+            {
+                "query": msg
+            }
+        )
+
+        print("MCP RESULTS:", results)
+
+        # =====================================
+        # BUILD CONTEXT
+        # =====================================
+
+        context = ""
+
+        for m in results.get("matches", []):
+
+            meta = m.get("metadata", {})
+
+            context += f"""
+Property: {meta.get('propertyName')}
+City: {meta.get('city')}
+Locality: {meta.get('locality')}
+Type: {meta.get('propertyType')}
+"""
+
+        # =====================================
+        # FALLBACK IF NO RESULTS
+        # =====================================
+
+        if context.strip() == "":
+            context = "No matching properties found."
+
+        # =====================================
+        # AI RESPONSE
+        # =====================================
 
         res = client.chat.completions.create(
             model="llama-3.1-8b-instant",
@@ -822,505 +1046,55 @@ Type: {p[4]}
             messages=[
 
                 {
-                    "role": "system",
-                    "content": """
-You are a real estate assistant chatbot.
+                     "role": "system",
+    "content": f"""
+You are a real estate chatbot.
 
-STRICT RULES:
-- Use only provided property data
-- No hallucination
-- Never write SQL
-- Never mention database
-- Keep replies short
-"""
+IMPORTANT RULES:
+- Respond ONLY in the user's language.
+- Allowed languages: English, Tamil, Kannada, Hindi, Telugu
+
+- Detected user language: {user_language}
+-If user speaks in multiple languages,respond in the same multiple languages
+- Use ONLY given property data.
+- Keep answers short.
+- Never hallucinate properties"""
                 },
-
-                *history[-5:],
 
                 {
                     "role": "user",
-                    "content":
-                    msg + "\n\nProperties:\n" + context
+                    "content": f"""
+User Query:
+{msg}
+Language:
+{user_language}
+Property Data:
+{context}
+"""
                 }
             ]
         )
 
         reply = res.choices[0].message.content
 
-        history.append({
-            "role": "user",
-            "content": msg
-        })
-
-        history.append({
-            "role": "assistant",
-            "content": reply
-        })
-
-        return reply
-
-    except Exception as e:
-
-        return f"❌ AI Error: {e}"
-def roommate_preferences(uid):
-
-    print("\n👥 ROOMMATE FORM\n")
-
-    data = {}
-
-    data["sleepTiming"] = input(
-        "Sleep timing: "
-    ).strip().lower()
-
-    data["foodHabit"] = input(
-        "Food habit: "
-    ).strip().lower()
-
-    data["smoking"] = input(
-        "Smoking: "
-    ).strip().lower()
-
-    data["drinking"] = input(
-        "Drinking: "
-    ).strip().lower()
-
-    data["guests"] = input(
-        "Guests frequency: "
-    ).strip().lower()
-
-    data["occupation"] = input(
-        "Working/student: "
-    ).strip().lower()
-
-    data["wakeUpTime"] = input(
-    "Wake up early or late: "
-    ).strip().lower()
-
-    data["studyStyle"] = input(
-        "Quiet study or group study: "
-    ).strip().lower()
-
-    data["musicHabit"] = input(
-        "Music loud or earphones: "
-    ).strip().lower()
-
-    data["socialEnergy"] = input(
-        "Introvert or extrovert: "
-    ).strip().lower()
-
-    data["cleaningFrequency"] = input(
-        "Daily cleaning or weekly cleaning: "
-    ).strip().lower()
-
-    data["workSchedule"] = input(
-        "Day shift or night shift: "
-    ).strip().lower()
-
-    data["petFriendly"] = input(
-        "Pet friendly yes/no: "
-    ).strip().lower()
-
-    data["sharingComfort"] = input(
-        "Comfortable sharing items? "
-    ).strip().lower()
-
-
-    data["friendVisits"] = input(
-        "Friends visit often or rarely: "
-    ).strip().lower()
-
-    data["cookingHabit"] = input(
-        "Cook regularly or outside food: "
-    ).strip().lower()
-
-    data["roomVibe"] = input(
-        "Calm vibe or energetic vibe: "
-    ).strip().lower()
-
-    try:
-
-        cursor.execute("""
-
-            INSERT INTO "UserPreference"
-            (
-                "userId",
-                "sharingTypes",
-                "createdAt",
-                "updatedAt"
-            )
-
-            VALUES
-            (
-                %s,
-                %s,
-                NOW(),
-                NOW()
-            )
-
-        """, (
-            uid,
-            json.dumps(data)
-        ))
-
-        conn.commit()
-
-        print("✅ Preferences Saved")
-        print("🎯 You can now type: find matches")
-
-    except Exception as e:
-
-        conn.rollback()
-
-        print("❌ Error")
-        print(e)
-def find_matches(uid):
-
-    try:
-
-        # current user preference
-        cursor.execute("""
-            SELECT "sharingTypes"
-            FROM "UserPreference"
-            WHERE "userId"=%s
-            ORDER BY id DESC
-            LIMIT 1
-        """, (uid,))
-
-        current = cursor.fetchone()
-
-        if not current:
-            print("❌ Complete roommate form first")
-            return
-
-        current_data = current[0]
-
-        if isinstance(current_data, str):
-            current_data = json.loads(current_data)
-
-        if isinstance(current_data, list):
-            current_data = current_data[0]
-
-        if not isinstance(current_data, dict):
-            current_data = {}
-
-        # 🔥 IMPORTANT CHANGE: join User table to get name/mobile
-        cursor.execute("""
-            SELECT 
-                u.id,
-                u.name,
-                u.mobile,
-                p."sharingTypes"
-            FROM "UserPreference" p
-            JOIN "User" u ON u.id = p."userId"
-            WHERE u.id != %s
-        """, (uid,))
-
-        others = cursor.fetchall()
-
-        print("\n👥 COMPATIBLE ROOMMATES\n")
-
-        found = False
-
-        for row in others:
-
-            other_uid = row[0]
-            name = row[1]
-            mobile = row[2]
-            other_data = row[3]
-
-            if isinstance(other_data, str):
-                other_data = json.loads(other_data)
-
-            if isinstance(other_data, list):
-                other_data = other_data[0]
-
-            if not isinstance(other_data, dict):
-                continue
-
-            score = 0
-
-            if current_data.get("sleepTiming") == other_data.get("sleepTiming"):
-                score += 2
-
-            if current_data.get("foodHabit") == other_data.get("foodHabit"):
-                score += 1
-
-            if current_data.get("smoking") == other_data.get("smoking"):
-                score += 2
-
-            if current_data.get("occupation") == other_data.get("occupation"):
-                score += 2
-
-            if score >= 5:
-
-                found = True
-
-                print("--------------------------------")
-                print("Name   :", name)
-                print("Mobile :", mobile)
-                print("User ID:", other_uid)
-                print("Score  :", score)
-
-                if score >= 8:
-                    print("Prediction: 🌟 Low conflict match")
-
-                elif score >= 6:
-                    print("Prediction: 📚 Good study environment")
-
-                else:
-                    print("Prediction: 🎉 Party-friendly group")
-
-        if not found:
-            print("❌ No compatible roommates found")
-
-    except Exception as e:
-        conn.rollback()
-        print("❌ Match Error")
-        print(e)
-# =========================
-# MAIN
-# =========================
-role = select_role()
-
-uid, city = register_user()
-
-print("\n✅ SYSTEM STARTED\n")
-
-selected_property = {
-    "data": None
-}
-
-move_in_keywords = [
-    "move in",
-    "ready to move",
-    "i am ready to move",
-    "iam ready to move",
-    "finalized house",
-    "i finalized the house"
-]
-
-while True:
-
-    msg = input("You: ").strip()
-
-    if msg == "":
-        print("❌ Empty message not allowed")
-        continue
-
-    lower_msg = msg.lower()
-
-    if lower_msg == "exit":
-        break
-
-    # =========================
-    # SAVE USER CHAT
-    # =========================
-    save_chat(uid, "user", msg)
-
-    # =========================
-    # PROPERTY SEARCH
-    # =========================
-    props = search(city)
-
-    for p in props:
-        save_view(uid, p[0])
-
-    # =========================
-    # SELLER ACTIONS
-    # =========================
-    if role == "seller":
-
-        if "add" in lower_msg:
-
-            add_property(uid)
-            continue
-
-    # =========================
-    # BUYER ACTIONS
-    # =========================
-    if role == "buyer":
-
-        if "like" in lower_msg:
-
-            pid = input("Property ID: ").strip()
-
-            if pid.isdigit():
-                like(uid, int(pid))
-
-            continue
-
-        if "visit" in lower_msg:
-
-            pid = input("Property ID: ").strip()
-
-            if pid.isdigit():
-                visit(uid, int(pid))
-
-            continue
-
-        if "message" in lower_msg:
-
-            message(uid)
-            continue
-    if "roomate" in lower_msg:
-
-        roommate_preferences(uid)
-
-        continue
-    if "find matches" in lower_msg:
-
-        find_matches(uid)
-
-        continue
-    # =========================
-    # GENERATE AD
-    # =========================
-    if "generate ad" in lower_msg or "ad" in lower_msg:
-
-        generate_ad()
-        continue
-
-    # =========================
-    # SELLING TIPS
-    # =========================
-    if "selling tips" in lower_msg:
-
-        tips = """
-
-🏠 PROPERTY SELLING TIPS
-
-1. Keep the property clean
-2. Use good lighting for photos
-3. Set competitive pricing
-4. Highlight locality advantages
-5. Mention parking and amenities
-6. Upload quality images
-7. Respond quickly to buyers
-"""
-
-        print(tips)
-
-        save_chat(uid, "assistant", tips)
-
-        continue
-
-    # =========================
-    # MOVE-IN MODE
-    # =========================
-    if any(k in lower_msg for k in move_in_keywords):
-
-        pid = input(
-            "Enter Property ID you finalized: "
-        ).strip()
-
-        if pid.isdigit():
-
-            selected_property["data"] = next(
-                (p for p in props if p[0] == int(pid)),
-                None
-            )
-
-            if selected_property["data"]:
-
-                reply = move_in_assistant(
-                    selected_property
-                )
-
-            else:
-
-                reply = "❌ Property not found"
-
-        else:
-
-            reply = "❌ Invalid Property ID"
-
-        print("\nAI:", reply)
-
         save_chat(uid, "assistant", reply)
 
-        continue
+        return jsonify({
+            "reply": reply,
+            "context": context
+        })
 
-    # =========================
-    # PROPERTY SEARCH KEYWORDS
-    # =========================
-    search_keywords = [
-        "show property",
-        "show properties",
-        "property in",
-        "properties in",
-        "find property",
-        "find properties"
-    ]
+    except Exception as e:
 
-    is_property_search = any(
-        word in lower_msg
-        for word in search_keywords
-    )
+        print("CHAT ERROR:", e)
 
-    if is_property_search:
+        return jsonify({
+            "error": str(e)
+        }), 500
 
-        search_city = city
+# =========================================
+# RUN
+# =========================================
+if __name__ == "__main__":
 
-        keywords = [
-            "show property in",
-            "show properties in",
-            "property in",
-            "properties in",
-            "find property in",
-            "find properties in"
-        ]
-
-        for key in keywords:
-
-            if key in lower_msg:
-
-                search_city = (
-                    lower_msg.replace(key, "")
-                    .strip()
-                )
-
-                break
-
-        props = search(search_city)
-
-        if len(props) == 0:
-
-            reply = "\n❌ No matching properties found."
-
-        else:
-
-            reply = "\n🏠 AVAILABLE PROPERTIES\n"
-
-            for p in props:
-
-                reply += f"""
---------------------------------
-Property ID : {p[0]}
-City        : {p[1]}
-Locality    : {p[2]}
-Name        : {p[3]}
-Type        : {p[4]}
-"""
-
-        print(reply)
-
-        save_chat(uid, "assistant", reply)
-
-        continue
-
-    # =========================
-    # DEFAULT AI CHAT
-    # =========================
-    reply = ai(msg, props)
-
-    print("\nAI:", reply)
-
-    save_chat(uid, "assistant", reply)
-
-# =========================
-# CLOSE
-# =========================
-cursor.close()
-conn.close()
-
-print("✅ Closed")
+    app.run(debug=True)
