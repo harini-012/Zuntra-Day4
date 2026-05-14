@@ -10,7 +10,7 @@ from flask_cors import CORS
 from datetime import datetime
 from gtts import gTTS
 import uuid
-
+from flask import Flask, render_template
 import cloudinary
 import cloudinary.uploader
 from langdetect import detect
@@ -27,6 +27,9 @@ load_dotenv()
 # =========================================
 app = Flask(__name__)
 CORS(app)
+@app.route("/")
+def home():
+    return render_template("add.html")
 
 # =========================================
 # GROQ
@@ -112,9 +115,20 @@ Type: {meta.get('propertyType')}
                 {
                     "role": "system",
                     "content": f"""
-You are a real estate chatbot.
-Respond ONLY in user's language: {user_language}
-Keep it short and natural.
+You are a real estate assistant.
+
+STRICT RULE:
+You MUST respond ONLY in this language: {user_language}
+
+ABSOLUTE RULES:
+- Do NOT use English unless language is ENGLISH
+- Do NOT mix languages
+- If language is TAMIL, respond fully in Tamil script
+- If HINDI, respond in Devanagari script
+- If TELUGU/KANNADA, use proper native script
+- Keep response short (2–4 lines max)
+
+Detected language: {user_language}
 """
                 },
                 {
