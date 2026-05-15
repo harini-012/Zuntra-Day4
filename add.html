@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 
-  <title>Real Estate AI Chatbot</title>
+  <title>AI Real Estate Voice Assistant</title>
 
   <style>
 
@@ -12,7 +12,7 @@
       margin:0;
       padding:0;
       box-sizing:border-box;
-      font-family:Arial, sans-serif;
+      font-family:Arial,sans-serif;
     }
 
     body{
@@ -23,18 +23,61 @@
       height:100vh;
     }
 
+    /* ================= LOGIN ================= */
+
+    .login-box{
+      position:absolute;
+      top:50%;
+      left:50%;
+      transform:translate(-50%,-50%);
+      background:white;
+      width:320px;
+      padding:25px;
+      border-radius:15px;
+      display:flex;
+      flex-direction:column;
+      gap:12px;
+      box-shadow:0 5px 20px rgba(0,0,0,0.2);
+    }
+
+    .login-box h2{
+      text-align:center;
+      margin-bottom:10px;
+    }
+
+    .login-box input{
+      padding:12px;
+      border-radius:8px;
+      border:1px solid #ccc;
+      font-size:14px;
+    }
+
+    .login-box button{
+      padding:12px;
+      border:none;
+      border-radius:8px;
+      background:#007bff;
+      color:white;
+      cursor:pointer;
+      font-size:15px;
+    }
+
+    .login-box button:hover{
+      background:#0056b3;
+    }
+
+    /* ================= CHAT ================= */
+
     .chat-container{
       width:420px;
       height:90vh;
       background:white;
       border-radius:15px;
       overflow:hidden;
-      display:flex;
+      display:none;
       flex-direction:column;
       box-shadow:0 5px 20px rgba(0,0,0,0.15);
     }
-
-    /* HEADER */
 
     .chat-header{
       background:#007bff;
@@ -44,8 +87,6 @@
       font-size:20px;
       font-weight:bold;
     }
-
-    /* CHAT AREA */
 
     .chat-body{
       flex:1;
@@ -72,7 +113,7 @@
       max-width:85%;
       padding:14px;
       border-radius:15px;
-      line-height:1.7;
+      line-height:1.6;
       font-size:15px;
     }
 
@@ -89,74 +130,48 @@
       border-bottom-left-radius:5px;
     }
 
-    /* IMAGE */
+    /* ================= CONTROLS ================= */
 
-    .property-image{
-      width:100%;
-      border-radius:10px;
-      margin-top:12px;
-      height:220px;
-      object-fit:cover;
+    .controls{
+      padding:10px;
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+      border-top:1px solid #eee;
     }
 
-    /* CONTACT */
-
-    .contact-box{
-      margin-top:15px;
-      background:#f0f4ff;
-      padding:12px;
-      border-radius:10px;
-      border:1px solid #d6e0ff;
-    }
-
-    .contact-box h4{
-      margin-bottom:8px;
-      color:#111;
-    }
-
-    .contact-box p{
-      margin-bottom:6px;
-      color:#444;
-      font-size:14px;
-    }
-
-    /* INPUT AREA */
-
-    .chat-footer{
-      padding:15px;
-      border-top:1px solid #ddd;
-      background:white;
-    }
-
-    input{
-      width:100%;
-      padding:12px;
-      margin-bottom:10px;
-      border:1px solid #ccc;
+    select{
+      padding:10px;
       border-radius:8px;
+      border:1px solid #ccc;
       font-size:14px;
     }
 
-    button{
-      width:100%;
+    .input-row{
+      display:flex;
+      gap:8px;
+    }
+
+    .input-row input{
+      flex:1;
       padding:12px;
+      border-radius:8px;
+      border:1px solid #ccc;
+      font-size:14px;
+    }
+
+    .input-row button{
+      padding:12px 15px;
       border:none;
       border-radius:8px;
       background:#007bff;
       color:white;
-      font-size:15px;
       cursor:pointer;
-    }
-
-    button:hover{
-      background:#0056b3;
-    }
-
-    .loading{
-      text-align:center;
-      margin-top:10px;
-      color:#666;
       font-size:14px;
+    }
+
+    .input-row button:hover{
+      background:#0056b3;
     }
 
   </style>
@@ -164,262 +179,385 @@
 
 <body>
 
+  <!-- ================= LOGIN ================= -->
+
+  <div class="login-box" id="loginBox">
+
+    <h2>User Login</h2>
+
+    <input
+      type="text"
+      id="name"
+      placeholder="Enter Name"
+    />
+
+    <input
+      type="text"
+      id="mobile"
+      placeholder="Enter Mobile"
+    />
+
+    <input
+      type="text"
+      id="city"
+      placeholder="Enter City"
+    />
+
+    <button onclick="registerUser()">
+      Continue
+    </button>
+
+  </div>
+
+  <!-- ================= CHAT ================= -->
+
   <div class="chat-container">
 
-    <!-- HEADER -->
-
     <div class="chat-header">
-
-      Real Estate AI Assistant
-
+      AI Real Estate Assistant
     </div>
-
-    <!-- CHAT BODY -->
 
     <div class="chat-body" id="chatBody">
 
       <div class="message bot-message">
-
         <div class="bubble">
-
           Hello 👋<br><br>
-
-          Upload a property image and enter Property ID to generate an AI advertisement.
-
+          You can:
+          <br>
+          • Find PGs
+          <br>
+          • Track visits
+          <br>
+          • Get recommendations
+          <br>
+          • Speak or type
         </div>
+      </div>
+
+    </div>
+
+    <!-- ================= CONTROLS ================= -->
+
+    <div class="controls">
+
+      <select id="langSelect">
+        <option value="en-IN">English</option>
+        <option value="ta-IN">Tamil</option>
+        <option value="hi-IN">Hindi</option>
+        <option value="te-IN">Telugu</option>
+        <option value="kn-IN">Kannada</option>
+      </select>
+
+      <div class="input-row">
+
+        <input
+          type="text"
+          id="textInput"
+          placeholder="Type message..."
+        />
+
+        <button onclick="sendText()">
+          Send
+        </button>
+
+        <button onclick="startVoice()">
+          🎤
+        </button>
+        <button onclick="logoutUser()">
+  Logout
+</button>
 
       </div>
 
     </div>
-    <button onclick="startVoice()">
-  🎤 Speak
-</button>
-
-    <!-- FOOTER -->
-
-    <div class="chat-footer">
-
-      <input
-        type="number"
-        id="propertyId"
-        placeholder="Enter Property ID"
-      >
-
-      <input
-        type="file"
-        id="imageFile"
-        accept="image/*"
-      >
-
-      <button onclick="generateAdvertisement()">
-
-        Generate Advertisement
-
-      </button>
-
-      <div class="loading" id="loading"></div>
-
-    </div>
 
   </div>
-<script>
- let recognition;
 
-// ================================
-// TEXT TO SPEECH (BOT VOICE)
-// ================================
-function speakText(text){
+  <!-- ================= SCRIPT ================= -->
 
-  const speech = new SpeechSynthesisUtterance(text);
+  <script>
 
-  // Try multilingual auto voice selection
-  const voices = window.speechSynthesis.getVoices();
+  let currentUserId = null;
 
-  const preferred =
-    voices.find(v =>
-      v.lang.includes("en") ||
-      v.lang.includes("ta") ||
-      v.lang.includes("hi") ||
-      v.lang.includes("kn") ||
-      v.lang.includes("te")
-    );
+  // ================= AUTO LOGIN =================
 
-  if(preferred){
-    speech.voice = preferred;
-  }
+  // ================= AUTO LOGIN =================
 
-  speech.rate = 1;
-  speech.pitch = 1;
-  speech.volume = 1;
+window.onload = async () => {
 
-  window.speechSynthesis.speak(speech);
-}
+  const savedUserId =
+    sessionStorage.getItem("userId");
 
-// ================================
-// SPEECH TO TEXT (MULTILINGUAL)
-// ================================
-function startVoice(){
+  // NO USER ID
+  if(!savedUserId){
 
-  recognition =
-    new (window.SpeechRecognition ||
-    window.webkitSpeechRecognition)();
+    document.getElementById("loginBox")
+      .style.display = "flex";
 
-  recognition.lang = "en-IN"; // base Indian English
+    document.querySelector(".chat-container")
+      .style.display = "none";
 
-  recognition.continuous = false;
-  recognition.interimResults = false;
-
-  recognition.onstart = function(){
-    alert("🎤 Listening...");
-  };
-
-  recognition.onresult = function(event){
-
-    let text = event.results[0][0].transcript;
-
-    document.getElementById("propertyId").value = "";
-
-    // Put voice text into message box logic
-    alert("You said: " + text);
-
-    // OPTIONAL: you can auto-send to chat API if needed
-  };
-
-  recognition.onerror = function(err){
-    console.log(err);
-    alert("Voice error");
-  };
-
-  recognition.start();
-}
-
-// ================================
-// EXISTING FUNCTION (UPDATED)
-// ================================
-async function generateAdvertisement(){
-
-  const propertyId =
-    document.getElementById("propertyId").value;
-
-  const file =
-    document.getElementById("imageFile").files[0];
-
-  const loading =
-    document.getElementById("loading");
-
-  const chatBody =
-    document.getElementById("chatBody");
-
-  if(!propertyId){
-    alert("Enter Property ID");
-    return;
-  }
-
-  if(!file){
-    alert("Upload image");
     return;
   }
 
   try{
 
-    loading.innerHTML = "Uploading image...";
+    const response = await fetch(
+      "http://127.0.0.1:5000/check-user/" + savedUserId
+    );
 
-    const userDiv = document.createElement("div");
-    userDiv.className = "message user-message";
-    userDiv.innerHTML = `
-      <div class="bubble">
-        Generate advertisement for Property ID: ${propertyId}
-      </div>
-    `;
-    chatBody.appendChild(userDiv);
+    const data = await response.json();
 
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("upload_preset", "realestate");
+    // USER EXISTS
+    if(data.exists){
 
-    const cloudinaryResponse =
-      await fetch(
-        "https://api.cloudinary.com/v1_1/dlafd1hxn/image/upload",
-        { method:"POST", body:formData }
-      );
+      currentUserId = savedUserId;
 
-    const cloudinaryData =
-      await cloudinaryResponse.json();
+      document.getElementById("loginBox")
+        .style.display = "none";
 
-    const imageUrl = cloudinaryData.secure_url;
+      document.querySelector(".chat-container")
+        .style.display = "flex";
+    }
 
-    loading.innerHTML = "Generating AI advertisement...";
+    // USER DOES NOT EXIST
+    else{
+
+      sessionStorage.removeItem("userId");
+
+      alert("User not found. Please login again.");
+
+      document.getElementById("loginBox")
+        .style.display = "flex";
+
+      document.querySelector(".chat-container")
+        .style.display = "none";
+    }
+
+  }catch(err){
+
+    console.log(err);
+
+    alert("Server error");
+  }
+};
+// ================= REGISTER =================
+
+async function registerUser(){
+
+  const name =
+    document.getElementById("name").value;
+
+  const mobile =
+    document.getElementById("mobile").value;
+
+  const city =
+    document.getElementById("city").value;
+
+  if(!name || !mobile || !city){
+
+    alert("Please fill all fields");
+
+    return;
+  }
+
+  try{
 
     const response = await fetch(
-      "http://127.0.0.1:5000/generate-ad",
+      "http://127.0.0.1:5000/register",
       {
         method:"POST",
-        headers:{ "Content-Type":"application/json" },
+        headers:{
+          "Content-Type":"application/json"
+        },
         body:JSON.stringify({
-          propertyId:propertyId,
-          imagePath:imageUrl
+          name,
+          mobile,
+          city
         })
       }
     );
 
     const data = await response.json();
 
-    loading.innerHTML = "";
+    currentUserId = data.userId;
 
-    if(data.error){
+    sessionStorage.setItem(
+      "userId",
+      data.userId
+    );
 
-      const errorDiv = document.createElement("div");
-      errorDiv.className = "message bot-message";
-      errorDiv.innerHTML = `<div class="bubble">${data.error}</div>`;
-      chatBody.appendChild(errorDiv);
+    document.getElementById("loginBox")
+      .style.display = "none";
 
-      return;
-    }
+    document.querySelector(".chat-container")
+      .style.display = "flex";
 
-    const formattedAd =
-      data.advertisement
-      .replace(/\*\*(.*?)\*\*/g,"<b>$1</b>")
-      .replace(/\n/g,"<br><br>");
+  }catch(err){
 
-    const botDiv = document.createElement("div");
-    botDiv.className = "message bot-message";
+    console.log(err);
 
-    const finalText =
-      data.advertisement.replace(/\*\*(.*?)\*\*/g,"$1");
-
-    botDiv.innerHTML = `
-      <div class="bubble">
-
-        ${formattedAd}
-
-        <img src="${data.imageUrl}" class="property-image"/>
-
-        <div class="contact-box">
-          <h4>Contact Information</h4>
-          <p><b>Owner:</b> ${data.ownerName}</p>
-          <p><b>Mobile:</b> ${data.mobile}</p>
-        </div>
-
-      </div>
-    `;
-
-    chatBody.appendChild(botDiv);
-
-    // 🔊 AUTO VOICE RESPONSE
-    speakText(finalText);
-
-    chatBody.scrollTop = chatBody.scrollHeight;
-
-  }
-
-  catch(error){
-    loading.innerHTML = "";
-    console.log(error);
-    alert("Server Error");
+    alert("Server error");
   }
 }
-</script>
 
+  // ================= SEND MESSAGE =================
+
+  async function sendMessage(text){
+
+    const chatBody =
+      document.getElementById("chatBody");
+
+    // USER MESSAGE
+    const userDiv =
+      document.createElement("div");
+
+    userDiv.className =
+      "message user-message";
+
+    userDiv.innerHTML =
+      `<div class="bubble">${text}</div>`;
+
+    chatBody.appendChild(userDiv);
+
+    chatBody.scrollTop =
+      chatBody.scrollHeight;
+
+    try{
+
+      const response = await fetch(
+        "http://127.0.0.1:5000/voice-reply",
+        {
+          method:"POST",
+          headers:{
+            "Content-Type":"application/json"
+          },
+          body:JSON.stringify({
+            userId: currentUserId,
+            message: text
+          })
+        }
+      );
+
+      const data = await response.json();
+
+      const botDiv =
+        document.createElement("div");
+
+      botDiv.className =
+        "message bot-message";
+
+      botDiv.innerHTML =
+        `<div class="bubble">${data.reply}</div>`;
+
+      chatBody.appendChild(botDiv);
+
+      // AUDIO
+      if(data.audio){
+
+        const audio = new Audio(
+          "http://127.0.0.1:5000" + data.audio
+        );
+
+        audio.play();
+      }
+
+      chatBody.scrollTop =
+        chatBody.scrollHeight;
+
+    }catch(err){
+
+      console.log(err);
+
+      const errDiv =
+        document.createElement("div");
+
+      errDiv.className =
+        "message bot-message";
+
+      errDiv.innerHTML =
+        `<div class="bubble">
+          ⚠️ Could not connect to server
+        </div>`;
+
+      chatBody.appendChild(errDiv);
+    }
+  }
+
+  // ================= SEND TEXT =================
+
+  function sendText(){
+
+    const input =
+      document.getElementById("textInput");
+
+    const text =
+      input.value.trim();
+
+    if(!text) return;
+
+    sendMessage(text);
+
+    input.value = "";
+  }
+
+  // ================= VOICE =================
+
+  async function startVoice(){
+
+    const selectedLang =
+      document.getElementById("langSelect").value;
+
+    const recognition =
+      new (
+        window.SpeechRecognition ||
+        window.webkitSpeechRecognition
+      )();
+
+    recognition.lang = selectedLang;
+
+    recognition.continuous = false;
+
+    recognition.interimResults = false;
+
+    recognition.onresult = async event => {
+
+      const text =
+        event.results[0][0].transcript;
+
+      sendMessage(text);
+    };
+
+    recognition.onerror = err => {
+
+      console.log(err);
+
+      alert(
+        "Voice Error: " + err.error
+      );
+    };
+
+    recognition.start();
+  }
+
+  // ================= LOGOUT =================
+
+  function logoutUser() {
+
+    sessionStorage.removeItem("userId");
+
+    currentUserId = null;
+
+    document.querySelector(".chat-container")
+      .style.display = "none";
+
+    document.getElementById("loginBox")
+      .style.display = "flex";
+
+    alert("Logged out successfully");
+  }
+
+</script>
 
 </body>
 </html>
