@@ -80,64 +80,464 @@ VOICE_LANG_MAP = {
     "TELUGU": "te",
     "KANNADA": "kn"
 }
+
+
+@app.route("/check-user/<int:uid>", methods=["GET"])
+def check_user(uid):
+
+    try:
+
+        cursor.execute(
+            'SELECT id FROM "User" WHERE id=%s',
+            (uid,)
+        )
+
+        user = cursor.fetchone()
+
+        if user:
+
+            return jsonify({
+                "exists": True
+            })
+
+        else:
+
+            return jsonify({
+                "exists": False
+            })
+
+    except Exception as e:
+
+        return jsonify({
+            "error": str(e)
+        }), 500
+# =========================================
+# VOICE REPLY
+# =========================================
+
 @app.route("/voice-reply", methods=["POST"])
 def voice_reply():
 
     try:
+
         data = request.json
 
         uid = data["userId"]
         msg = data["message"]
 
+        print("USER:", uid)
+        print("MESSAGE:", msg)
+
+        # =====================================
+        # CHECK USER EXISTS
+        # =====================================
+
+        cursor.execute(
+            'SELECT id,name FROM "User" WHERE id=%s',
+            (uid,)
+        )
+
+        existing_user = cursor.fetchone()
+
+        if not existing_user:
+
+            return jsonify({
+                "error": "invalid user"
+            }), 404
+
+        # =====================================
+        # LANGUAGE DETECTION
+        # =====================================
+
         user_language = detect_language(msg)
+
         save_chat(uid, "user", msg)
 
-        # reuse your MCP + context logic
-        results = call_mcp_tool("search-properties", {"query": msg})
-
         context = ""
-        for m in results.get("matches", []):
-            meta = m.get("metadata", {})
-            context += f"""
+
+        # =====================================
+        # VISIT KEYWORDS
+        # =====================================
+
+        visit_keywords = [
+
+            "visit",
+            "visits",
+            "visited",
+            "booked visit",
+            "scheduled visit",
+            "my visits",
+            "visit history",
+            "confirmed visit",
+            "cancel visit",
+            "next visit",
+            "upcoming visit"
+
+        ]
+
+        # =====================================
+        # VISIT ASSISTANT
+        # =====================================
+
+        if any(word in msg.lower() for word in visit_keywords):
+
+            # =====================================
+            # CANCEL VISIT
+            # =====================================
+
+            if "cancel" in msg.lower():
+
+                cursor.execute("""
+
+                    UPDATE "Visit"
+
+                    SET status='cancelled'
+
+                    WHERE id=(
+
+                        SELECT id
+                        FROM "Visit"
+
+                        WHERE
+                            "userId"=%s
+                            AND status!='cancelled'
+
+                        ORDER BY "visitDateTime" DESC
+
+                        LIMIT 1
+                    )
+
+                """, (uid,))
+
+                context = "Latest visit cancelled."
+
+            # =====================================
+            # CONFIRMED VISITS
+            # =====================================
+
+            elif "confirmed" in msg.lower():
+
+                cursor.execute("""
+
+                    SELECT
+                        p."propertyName",
+                        p.city,
+                        p.locality,
+                        p."propertyType",
+                        v."visitDateTime",
+                        v.status
+
+                    FROM "Visit" v
+
+                    JOIN "Property" p
+                    ON p.id = v."propertyId"
+
+                    WHERE
+                        v."userId"=%s
+                        AND v.status='confirmed'
+
+                    ORDER BY v."visitDateTime" ASC
+
+                """, (uid,))
+
+                rows = cursor.fetchall()
+
+                if rows:
+
+                    for r in rows:
+
+                        context += f"""
+Property: {r[0]}
+City: {r[1]}
+Locality: {r[2]}
+Type: {r[3]}
+Visit Time: {r[4]}
+Status: {r[5]}
+"""
+
+                else:
+
+                    context = "No confirmed visits found."
+
+            # =====================================
+            # NEXT VISIT
+            # =====================================
+
+            elif "next" in msg.lower() or "upcoming" in msg.lower():
+
+                cursor.execute("""
+
+                    SELECT
+                        p."propertyName",
+                        p.city,
+                        p.locality,
+                        p."propertyType",
+                        v."visitDateTime",
+                        v.status
+
+                    FROM "Visit" v
+
+                    JOIN "Property" p
+                    ON p.id = v."propertyId"
+
+                    WHERE
+                        v."userId"=%s
+                        AND v."visitDateTime" >= NOW()
+
+                    ORDER BY v."visitDateTime" ASC
+
+                    LIMIT 1
+
+                """, (uid,))
+
+                rows = cursor.fetchall()
+
+                if rows:
+
+                    for r in rows:
+
+                        context += f"""
+Property: {r[0]}
+City: {r[1]}
+Locality: {r[2]}
+Type: {r[3]}
+Visit Time: {r[4]}
+Status: {r[5]}
+"""
+
+                else:
+
+                    context = "No upcoming visits found."
+
+            # =====================================
+            # VISITS IN CHENNAI
+            # =====================================
+
+            elif "chennai" in msg.lower():
+
+                cursor.execute("""
+
+                    SELECT
+                        p."propertyName",
+                        p.city,
+                        p.locality,
+                        p."propertyType",
+                        v."visitDateTime",
+                        v.status
+
+                    FROM "Visit" v
+
+                    JOIN "Property" p
+                    ON p.id = v."propertyId"
+
+                    WHERE
+                        v."userId"=%s
+                        AND LOWER(p.city)='chennai'
+
+                    ORDER BY v."visitDateTime" DESC
+
+                """, (uid,))
+
+                rows = cursor.fetchall()
+
+                if rows:
+
+                    for r in rows:
+
+                        context += f"""
+Property: {r[0]}
+City: {r[1]}
+Locality: {r[2]}
+Type: {r[3]}
+Visit Time: {r[4]}
+Status: {r[5]}
+"""
+
+                else:
+
+                    context = "No Chennai visits found."
+
+            # =====================================
+            # ALL VISITS
+            # =====================================
+
+            else:
+
+                cursor.execute("""
+
+                    SELECT
+                        p."propertyName",
+                        p.city,
+                        p.locality,
+                        p."propertyType",
+                        v."visitDateTime",
+                        v.status
+
+                    FROM "Visit" v
+
+                    JOIN "Property" p
+                    ON p.id = v."propertyId"
+
+                    WHERE v."userId"=%s
+
+                    ORDER BY v."visitDateTime" DESC
+
+                """, (uid,))
+
+                rows = cursor.fetchall()
+
+                if rows:
+
+                    for r in rows:
+
+                        context += f"""
+Property: {r[0]}
+City: {r[1]}
+Locality: {r[2]}
+Type: {r[3]}
+Visit Time: {r[4]}
+Status: {r[5]}
+"""
+
+                else:
+
+                    context = "No visited properties found."
+
+        # =====================================
+        # PROPERTY RECOMMENDATION ASSISTANT
+        # =====================================
+
+        else:
+
+            smart_query = msg.lower()
+
+            # =====================================
+            # SMART FILTERS
+            # =====================================
+
+            if "girls" in smart_query:
+                smart_query += " girls pg"
+
+            if "boys" in smart_query:
+                smart_query += " boys pg"
+
+            if "food" in smart_query:
+                smart_query += " food included"
+
+            if "2bhk" in smart_query:
+                smart_query += " 2bhk"
+
+            if "1bhk" in smart_query:
+                smart_query += " 1bhk"
+
+            if "chennai" in smart_query:
+                smart_query += " chennai"
+
+            # =====================================
+            # USER PREFERENCE MATCHING
+            # =====================================
+
+            cursor.execute("""
+
+                SELECT
+                    city,
+                    locality,
+                    "preferredTenant",
+                    "foodIncluded",
+                    "rentMin",
+                    "rentMax"
+
+                FROM "UserPreference"
+
+                WHERE "userId"=%s
+
+                ORDER BY id DESC
+
+                LIMIT 1
+
+            """, (uid,))
+
+            pref = cursor.fetchone()
+
+            if pref:
+
+                if pref[0]:
+                    smart_query += f" {pref[0]}"
+
+                if pref[1]:
+                    smart_query += f" {pref[1]}"
+
+                if pref[2]:
+                    smart_query += f" {pref[2]}"
+
+                if pref[3]:
+                    smart_query += " food included"
+
+            # =====================================
+            # MCP PROPERTY SEARCH
+            # =====================================
+
+            results = call_mcp_tool(
+                "search-properties",
+                {
+                    "query": smart_query
+                }
+            )
+
+            # =====================================
+            # BUILD PROPERTY CONTEXT
+            # =====================================
+
+            for m in results.get("matches", []):
+
+                meta = m.get("metadata", {})
+
+                context += f"""
 Property: {meta.get('propertyName')}
 City: {meta.get('city')}
 Locality: {meta.get('locality')}
 Type: {meta.get('propertyType')}
 """
 
-        if context.strip() == "":
-            context = "No matching properties found."
+            if context.strip() == "":
+                context = "No matching properties found."
+
+        # =====================================
+        # AI RESPONSE
+        # =====================================
 
         res = client.chat.completions.create(
+
             model="llama-3.1-8b-instant",
+
             temperature=0.2,
+
             messages=[
+
                 {
                     "role": "system",
                     "content": f"""
-You are a real estate assistant.
+You are a real estate voice assistant.
 
-STRICT RULE:
-You MUST respond ONLY in this language: {user_language}
-
-ABSOLUTE RULES:
-- Do NOT use English unless language is ENGLISH
+STRICT RULES:
+- Respond ONLY in this language: {user_language}
 - Do NOT mix languages
-- If language is TAMIL, respond fully in Tamil script
-- If HINDI, respond in Devanagari script
-- If TELUGU/KANNADA, use proper native script
-- Keep response short (2–4 lines max)
+- Keep responses short (2–4 lines)
+- Use ONLY provided property data
+- Never hallucinate
+- Be conversational and professional
 
 Detected language: {user_language}
 """
                 },
+
                 {
                     "role": "user",
                     "content": f"""
 User Query:
 {msg}
 
-Property Data:
+Database Data:
 {context}
 """
                 }
@@ -145,21 +545,40 @@ Property Data:
         )
 
         reply = res.choices[0].message.content
+
         save_chat(uid, "assistant", reply)
 
-        # convert language
-        lang_code = VOICE_LANG_MAP.get(user_language, "en")
+        # =====================================
+        # GENERATE VOICE
+        # =====================================
 
-        audio_url = generate_voice(reply, lang_code)
+        lang_code = VOICE_LANG_MAP.get(
+            user_language,
+            "en"
+        )
+
+        audio_url = generate_voice(
+            reply,
+            lang_code
+        )
+
+        # =====================================
+        # FINAL RESPONSE
+        # =====================================
 
         return jsonify({
+
             "reply": reply,
             "audio": audio_url,
             "language": user_language
+
         })
 
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+
+        return jsonify({
+            "error": str(e)
+        }), 500
 def generate_voice(text, lang_code="en"):
     try:
         filename = f"voice_{uuid.uuid4()}.mp3"
