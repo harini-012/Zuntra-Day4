@@ -1,0 +1,1242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>RentIT — AI Real Estate Assistant</title>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet"/>
+
+  <style>
+    /* ============================================================
+       TOKENS
+    ============================================================ */
+    :root{
+      --gold:       #C9A84C;
+      --gold-light: #e8c97a;
+      --dark:       #0E0E12;
+      --dark2:      #17171D;
+      --dark3:      #21212B;
+      --surface:    #2A2A36;
+      --border:     rgba(201,168,76,0.18);
+      --text:       #F0EDE8;
+      --muted:      #8A8799;
+      --white:      #ffffff;
+      --radius:     16px;
+      --shadow:     0 24px 60px rgba(0,0,0,0.5);
+    }
+
+    /* ============================================================
+       RESET & BASE
+    ============================================================ */
+    *{ margin:0; padding:0; box-sizing:border-box; }
+
+    body{
+      font-family:'DM Sans',sans-serif;
+      background: var(--dark);
+      min-height:100vh;
+      overflow:hidden;
+      position:relative;
+    }
+
+    /* Ambient background orbs */
+    body::before{
+      content:'';
+      position:fixed;
+      width:600px; height:600px;
+      border-radius:50%;
+      background: radial-gradient(circle, rgba(201,168,76,0.07) 0%, transparent 70%);
+      top:-150px; right:-150px;
+      pointer-events:none;
+    }
+    body::after{
+      content:'';
+      position:fixed;
+      width:400px; height:400px;
+      border-radius:50%;
+      background: radial-gradient(circle, rgba(201,168,76,0.05) 0%, transparent 70%);
+      bottom:-100px; left:-100px;
+      pointer-events:none;
+    }
+
+    /* ============================================================
+       PAGE LAYOUT
+    ============================================================ */
+    .page{
+      position:fixed;
+      inset:0;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      transition: opacity .45s ease, transform .45s ease;
+    }
+    .page.hidden{
+      opacity:0;
+      pointer-events:none;
+      transform: translateY(20px);
+    }
+
+    /* ============================================================
+       LOGIN PAGE  — split layout
+    ============================================================ */
+    #loginPage{
+      flex-direction:row;
+      gap:0;
+    }
+
+    /* Left hero panel */
+    .hero-panel{
+      width:420px;
+      min-height:560px;
+      background: linear-gradient(145deg, #1a1610 0%, #2c2209 50%, #1a1610 100%);
+      border:1px solid var(--border);
+      border-radius: var(--radius) 0 0 var(--radius);
+      padding:52px 40px;
+      display:flex;
+      flex-direction:column;
+      justify-content:space-between;
+      position:relative;
+      overflow:hidden;
+    }
+
+    /* geometric grid accent */
+    .hero-panel::before{
+      content:'';
+      position:absolute;
+      inset:0;
+      background-image:
+        linear-gradient(rgba(201,168,76,0.06) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(201,168,76,0.06) 1px, transparent 1px);
+      background-size: 36px 36px;
+    }
+
+    .brand{
+      position:relative;
+      z-index:1;
+    }
+    .brand-logo{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      margin-bottom:48px;
+    }
+    .brand-icon{
+      width:42px; height:42px;
+      background: var(--gold);
+      border-radius:10px;
+      display:flex; align-items:center; justify-content:center;
+      font-size:20px;
+      box-shadow:0 4px 20px rgba(201,168,76,0.35);
+    }
+    .brand-name{
+      font-family:'Playfair Display',serif;
+      font-size:26px;
+      color:var(--gold);
+      letter-spacing:1px;
+    }
+
+    .hero-headline{
+      font-family:'Playfair Display',serif;
+      font-size:36px;
+      line-height:1.25;
+      color:var(--text);
+      margin-bottom:18px;
+    }
+    .hero-headline span{ color:var(--gold); }
+
+    .hero-sub{
+      font-size:14px;
+      color:var(--muted);
+      line-height:1.7;
+      margin-bottom:36px;
+    }
+
+    .hero-pills{
+      display:flex;
+      flex-wrap:wrap;
+      gap:8px;
+    }
+    .pill{
+      background:rgba(201,168,76,0.1);
+      border:1px solid var(--border);
+      color:var(--gold-light);
+      font-size:12px;
+      padding:6px 14px;
+      border-radius:20px;
+    }
+
+    .hero-stats{
+      position:relative;
+      z-index:1;
+      display:flex;
+      gap:28px;
+    }
+    .stat-item{ display:flex; flex-direction:column; gap:2px; }
+    .stat-num{
+      font-family:'Playfair Display',serif;
+      font-size:24px;
+      color:var(--gold);
+    }
+    .stat-label{ font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.6px; }
+
+    /* Right form panel */
+    .form-panel{
+      width:380px;
+      min-height:560px;
+      background:var(--dark2);
+      border:1px solid var(--border);
+      border-left:none;
+      border-radius:0 var(--radius) var(--radius) 0;
+      padding:48px 40px;
+      display:flex;
+      flex-direction:column;
+      justify-content:center;
+    }
+
+    .form-title{
+      font-family:'Playfair Display',serif;
+      font-size:26px;
+      color:var(--text);
+      margin-bottom:6px;
+    }
+    .form-sub{
+      font-size:13px;
+      color:var(--muted);
+      margin-bottom:32px;
+    }
+
+    .field{
+      margin-bottom:18px;
+    }
+    .field label{
+      display:block;
+      font-size:11px;
+      font-weight:600;
+      text-transform:uppercase;
+      letter-spacing:.8px;
+      color:var(--muted);
+      margin-bottom:8px;
+    }
+    .field input{
+      width:100%;
+      background:var(--dark3);
+      border:1px solid rgba(255,255,255,0.08);
+      border-radius:10px;
+      padding:14px 16px;
+      color:var(--text);
+      font-size:14px;
+      font-family:'DM Sans',sans-serif;
+      outline:none;
+      transition: border-color .2s, box-shadow .2s;
+    }
+    .field input::placeholder{ color:var(--muted); }
+    .field input:focus{
+      border-color:var(--gold);
+      box-shadow:0 0 0 3px rgba(201,168,76,0.12);
+    }
+
+    .btn-primary{
+      width:100%;
+      padding:15px;
+      background: linear-gradient(135deg, var(--gold) 0%, #a8802a 100%);
+      border:none;
+      border-radius:10px;
+      color:#0E0E12;
+      font-size:15px;
+      font-weight:700;
+      font-family:'DM Sans',sans-serif;
+      cursor:pointer;
+      margin-top:8px;
+      letter-spacing:.3px;
+      transition: transform .15s, box-shadow .2s, opacity .2s;
+      box-shadow:0 6px 24px rgba(201,168,76,0.3);
+    }
+    .btn-primary:hover{
+      transform:translateY(-1px);
+      box-shadow:0 10px 32px rgba(201,168,76,0.45);
+    }
+    .btn-primary:active{ transform:translateY(0); }
+    .btn-primary:disabled{ opacity:.5; cursor:not-allowed; transform:none; }
+
+    .form-note{
+      text-align:center;
+      font-size:12px;
+      color:var(--muted);
+      margin-top:20px;
+    }
+
+    /* ============================================================
+       CHAT PAGE
+    ============================================================ */
+    #chatPage{
+      align-items:stretch;
+      padding:0;
+    }
+
+    .chat-wrapper{
+      width:100vw;
+      height:100vh;
+      display:flex;
+      flex-direction:column;
+      background:var(--dark);
+    }
+
+    /* ---- CHAT HEADER ---- */
+    .chat-header{
+      background:var(--dark2);
+      border-bottom:1px solid var(--border);
+      padding:0 28px;
+      height:68px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      flex-shrink:0;
+    }
+    .header-left{
+      display:flex;
+      align-items:center;
+      gap:14px;
+    }
+    .header-avatar{
+      width:42px; height:42px;
+      background: linear-gradient(135deg, var(--gold), #a8802a);
+      border-radius:12px;
+      display:flex; align-items:center; justify-content:center;
+      font-size:20px;
+      box-shadow:0 4px 16px rgba(201,168,76,0.3);
+      flex-shrink:0;
+    }
+    .header-info{}
+    .header-name{
+      font-family:'Playfair Display',serif;
+      font-size:18px;
+      color:var(--text);
+      line-height:1.2;
+    }
+    .header-status{
+      display:flex; align-items:center; gap:6px;
+      font-size:12px; color:var(--muted);
+    }
+    .status-dot{
+      width:7px; height:7px;
+      border-radius:50%;
+      background:#4ade80;
+      box-shadow:0 0 6px #4ade8088;
+      animation: pulse-dot 2s ease-in-out infinite;
+    }
+    @keyframes pulse-dot{
+      0%,100%{ opacity:1; }
+      50%{ opacity:.4; }
+    }
+
+    .header-right{
+      display:flex; align-items:center; gap:12px;
+    }
+    .lang-select{
+      background:var(--dark3);
+      border:1px solid var(--border);
+      color:var(--text);
+      font-size:13px;
+      font-family:'DM Sans',sans-serif;
+      padding:8px 12px;
+      border-radius:8px;
+      outline:none;
+      cursor:pointer;
+    }
+    .lang-select option{ background:var(--dark2); }
+
+    .btn-logout{
+      background:transparent;
+      border:1px solid rgba(255,255,255,0.1);
+      color:var(--muted);
+      font-size:12px;
+      font-family:'DM Sans',sans-serif;
+      padding:8px 16px;
+      border-radius:8px;
+      cursor:pointer;
+      transition:all .2s;
+    }
+    .btn-logout:hover{
+      border-color:var(--gold);
+      color:var(--gold);
+    }
+
+    /* ---- ASSISTANT BADGE ---- */
+    .assistant-bar{
+      background:rgba(201,168,76,0.06);
+      border-bottom:1px solid var(--border);
+      padding:8px 28px;
+      display:flex;
+      align-items:center;
+      gap:8px;
+      flex-shrink:0;
+      overflow-x:auto;
+      scrollbar-width:none;
+    }
+    .assistant-bar::-webkit-scrollbar{ display:none; }
+    .assistant-label{
+      font-size:11px;
+      color:var(--muted);
+      white-space:nowrap;
+      text-transform:uppercase;
+      letter-spacing:.6px;
+      margin-right:4px;
+    }
+    .asst-chip{
+      background:var(--dark3);
+      border:1px solid var(--border);
+      color:var(--muted);
+      font-size:11px;
+      padding:5px 12px;
+      border-radius:20px;
+      white-space:nowrap;
+      cursor:pointer;
+      transition:all .2s;
+      flex-shrink:0;
+    }
+    .asst-chip.active{
+      background:rgba(201,168,76,0.15);
+      border-color:var(--gold);
+      color:var(--gold-light);
+    }
+    .asst-chip:hover:not(.active){
+      border-color:rgba(201,168,76,0.4);
+      color:var(--text);
+    }
+
+    /* ---- CHAT BODY ---- */
+    .chat-body{
+      flex:1;
+      overflow-y:auto;
+      padding:28px;
+      display:flex;
+      flex-direction:column;
+      gap:18px;
+      scroll-behavior:smooth;
+    }
+    .chat-body::-webkit-scrollbar{ width:4px; }
+    .chat-body::-webkit-scrollbar-track{ background:transparent; }
+    .chat-body::-webkit-scrollbar-thumb{ background:var(--surface); border-radius:4px; }
+
+    /* Messages */
+    .msg-row{
+      display:flex;
+      gap:12px;
+      animation: fadeSlideUp .3s ease forwards;
+      opacity:0;
+    }
+    @keyframes fadeSlideUp{
+      from{ opacity:0; transform:translateY(12px); }
+      to{   opacity:1; transform:translateY(0); }
+    }
+
+    .msg-row.user{ flex-direction:row-reverse; }
+
+    .msg-avatar{
+      width:34px; height:34px;
+      border-radius:10px;
+      display:flex; align-items:center; justify-content:center;
+      font-size:14px;
+      flex-shrink:0;
+      margin-top:2px;
+    }
+    .bot .msg-avatar{
+      background: linear-gradient(135deg, var(--gold), #a8802a);
+    }
+    .user .msg-avatar{
+      background:var(--surface);
+    }
+
+    .bubble{
+      max-width:68%;
+      padding:14px 18px;
+      border-radius:16px;
+      font-size:14.5px;
+      line-height:1.65;
+      position:relative;
+    }
+    .bot .bubble{
+      background:var(--dark3);
+      border:1px solid var(--border);
+      color:var(--text);
+      border-top-left-radius:4px;
+    }
+    .user .bubble{
+      background: linear-gradient(135deg, var(--gold) 0%, #a8802a 100%);
+      color:#0E0E12;
+      font-weight:500;
+      border-top-right-radius:4px;
+      box-shadow:0 4px 20px rgba(201,168,76,0.25);
+    }
+
+    .bubble-meta{
+      font-size:10px;
+      color:var(--muted);
+      margin-top:6px;
+      display:flex;
+      align-items:center;
+      gap:6px;
+    }
+    .user .bubble-meta{ justify-content:flex-end; }
+
+    .assistant-tag{
+      background:rgba(201,168,76,0.15);
+      border:1px solid rgba(201,168,76,0.3);
+      color:var(--gold-light);
+      font-size:10px;
+      padding:2px 8px;
+      border-radius:8px;
+    }
+
+    /* Audio play button inside bubble */
+    .audio-btn{
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+      margin-top:10px;
+      background:rgba(201,168,76,0.12);
+      border:1px solid var(--border);
+      border-radius:8px;
+      padding:6px 12px;
+      font-size:12px;
+      color:var(--gold-light);
+      cursor:pointer;
+      transition:all .2s;
+    }
+    .audio-btn:hover{
+      background:rgba(201,168,76,0.22);
+    }
+
+    /* Typing indicator */
+    .typing-indicator{
+      display:flex; gap:5px; align-items:center;
+      padding:14px 18px;
+      background:var(--dark3);
+      border:1px solid var(--border);
+      border-radius:16px;
+      border-top-left-radius:4px;
+      width:fit-content;
+    }
+    .typing-dot{
+      width:7px; height:7px;
+      border-radius:50%;
+      background:var(--muted);
+      animation: typingBounce 1.2s ease-in-out infinite;
+    }
+    .typing-dot:nth-child(2){ animation-delay:.2s; }
+    .typing-dot:nth-child(3){ animation-delay:.4s; }
+    @keyframes typingBounce{
+      0%,60%,100%{ transform:translateY(0); opacity:.4; }
+      30%{ transform:translateY(-6px); opacity:1; }
+    }
+
+    /* ---- CHAT INPUT ---- */
+    .chat-footer{
+      padding:18px 28px 22px;
+      background:var(--dark2);
+      border-top:1px solid var(--border);
+      flex-shrink:0;
+    }
+
+    .quick-chips{
+      display:flex;
+      gap:8px;
+      margin-bottom:14px;
+      flex-wrap:wrap;
+    }
+    .q-chip{
+      background:var(--dark3);
+      border:1px solid var(--border);
+      color:var(--muted);
+      font-size:12px;
+      padding:6px 14px;
+      border-radius:20px;
+      cursor:pointer;
+      transition:all .2s;
+      font-family:'DM Sans',sans-serif;
+    }
+    .q-chip:hover{
+      border-color:var(--gold);
+      color:var(--gold-light);
+      background:rgba(201,168,76,0.08);
+    }
+
+    .input-row{
+      display:flex;
+      gap:10px;
+      align-items:center;
+    }
+
+    .msg-input{
+      flex:1;
+      background:var(--dark3);
+      border:1px solid rgba(255,255,255,0.08);
+      border-radius:12px;
+      padding:14px 18px;
+      color:var(--text);
+      font-size:14px;
+      font-family:'DM Sans',sans-serif;
+      outline:none;
+      transition:border-color .2s, box-shadow .2s;
+    }
+    .msg-input::placeholder{ color:var(--muted); }
+    .msg-input:focus{
+      border-color:var(--gold);
+      box-shadow:0 0 0 3px rgba(201,168,76,0.1);
+    }
+
+    .icon-btn{
+      width:48px; height:48px;
+      border:none;
+      border-radius:12px;
+      display:flex; align-items:center; justify-content:center;
+      cursor:pointer;
+      font-size:18px;
+      transition:all .2s;
+      flex-shrink:0;
+    }
+    .btn-send{
+      background: linear-gradient(135deg, var(--gold), #a8802a);
+      color:#0E0E12;
+      box-shadow:0 4px 16px rgba(201,168,76,0.3);
+    }
+    .btn-send:hover{
+      transform:scale(1.05);
+      box-shadow:0 6px 22px rgba(201,168,76,0.45);
+    }
+    .btn-mic{
+      background:var(--dark3);
+      border:1px solid var(--border);
+      color:var(--muted);
+    }
+    .btn-mic:hover{
+      border-color:var(--gold);
+      color:var(--gold);
+    }
+    .btn-mic.recording{
+      background:rgba(239,68,68,0.15);
+      border-color:#ef4444;
+      color:#ef4444;
+      animation: micPulse 1s ease-in-out infinite;
+    }
+    @keyframes micPulse{
+      0%,100%{ box-shadow:0 0 0 0 rgba(239,68,68,0.4); }
+      50%{ box-shadow:0 0 0 8px rgba(239,68,68,0); }
+    }
+
+    /* ============================================================
+       TOAST
+    ============================================================ */
+    .toast{
+      position:fixed;
+      bottom:28px; left:50%;
+      transform:translateX(-50%) translateY(20px);
+      background:var(--dark3);
+      border:1px solid var(--border);
+      color:var(--text);
+      padding:12px 22px;
+      border-radius:10px;
+      font-size:13px;
+      opacity:0;
+      transition:all .3s;
+      pointer-events:none;
+      z-index:999;
+      box-shadow:0 8px 30px rgba(0,0,0,0.5);
+    }
+    .toast.show{
+      opacity:1;
+      transform:translateX(-50%) translateY(0);
+    }
+
+    /* ============================================================
+       WELCOME CARD (first message)
+    ============================================================ */
+    .welcome-card{
+      background:var(--dark3);
+      border:1px solid var(--border);
+      border-radius:16px;
+      padding:22px;
+      max-width:380px;
+    }
+    .welcome-card h3{
+      font-family:'Playfair Display',serif;
+      font-size:18px;
+      color:var(--text);
+      margin-bottom:12px;
+    }
+    .welcome-card h3 span{ color:var(--gold); }
+    .capability-grid{
+      display:grid;
+      grid-template-columns:1fr 1fr;
+      gap:8px;
+    }
+    .cap-item{
+      background:rgba(201,168,76,0.06);
+      border:1px solid var(--border);
+      border-radius:10px;
+      padding:10px 12px;
+      font-size:12px;
+      color:var(--muted);
+      display:flex; align-items:center; gap:7px;
+    }
+    .cap-item span{ color:var(--gold); font-size:14px; }
+
+    /* ============================================================
+       RESPONSIVE
+    ============================================================ */
+    @media(max-width:820px){
+      .hero-panel{ display:none; }
+      .form-panel{
+        width:340px;
+        border-radius:var(--radius);
+        border-left:1px solid var(--border);
+      }
+      .bubble{ max-width:82%; }
+      .chat-header{ padding:0 16px; }
+      .chat-body{ padding:16px; }
+      .chat-footer{ padding:14px 16px 18px; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ============================================================
+     TOAST
+============================================================ -->
+<div class="toast" id="toast"></div>
+
+<!-- ============================================================
+     LOGIN PAGE
+============================================================ -->
+<div class="page" id="loginPage">
+
+  <!-- HERO -->
+  <div class="hero-panel">
+    <div class="brand">
+      <div class="brand-logo">
+        <div class="brand-icon">🏠</div>
+        <div class="brand-name">RentIT</div>
+      </div>
+
+      <h1 class="hero-headline">
+        Find Your<br>
+        <span>Perfect Home</span><br>
+        with AI
+      </h1>
+
+      <p class="hero-sub">
+        RentIT's AI assistant speaks your language,
+        understands your needs, and finds you the
+        right property — instantly.
+      </p>
+
+      <div class="hero-pills">
+        <div class="pill">🗣 Voice Enabled</div>
+        <div class="pill">🌐 Multilingual</div>
+        <div class="pill">🤖 AI Powered</div>
+        <div class="pill">🏙 10 Assistants</div>
+      </div>
+    </div>
+
+    <div class="hero-stats">
+      <div class="stat-item">
+        <div class="stat-num">10K+</div>
+        <div class="stat-label">Properties</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-num">5</div>
+        <div class="stat-label">Languages</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-num">24/7</div>
+        <div class="stat-label">AI Support</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- FORM -->
+  <div class="form-panel">
+    <div class="form-title">Get Started</div>
+    <div class="form-sub">Enter your details to open your AI assistant</div>
+
+    <div class="field">
+      <label>Full Name</label>
+      <input type="text" id="name" placeholder="e.g. Arjun Kumar"/>
+    </div>
+
+    <div class="field">
+      <label>Mobile Number</label>
+      <input type="tel" id="mobile" placeholder="e.g. 9876543210"/>
+    </div>
+
+    <div class="field">
+      <label>Your City</label>
+      <input type="text" id="city" placeholder="e.g. Chennai"/>
+    </div>
+
+    <button class="btn-primary" id="loginBtn" onclick="registerUser()">
+      Open RentIT Assistant →
+    </button>
+
+    <div class="form-note">
+      Already registered? We'll log you in automatically.
+    </div>
+  </div>
+
+</div>
+
+<!-- ============================================================
+     CHAT PAGE
+============================================================ -->
+<div class="page hidden" id="chatPage">
+  <div class="chat-wrapper">
+
+    <!-- HEADER -->
+    <div class="chat-header">
+      <div class="header-left">
+        <div class="header-avatar">🏠</div>
+        <div class="header-info">
+          <div class="header-name">RentIT</div>
+          <div class="header-status">
+            <div class="status-dot"></div>
+            AI Assistant Online
+          </div>
+        </div>
+      </div>
+
+      <div class="header-right">
+        <select class="lang-select" id="langSelect">
+          <option value="en-IN">🇬🇧 English</option>
+          <option value="ta-IN">🇮🇳 Tamil</option>
+          <option value="hi-IN">🇮🇳 Hindi</option>
+          <option value="te-IN">🇮🇳 Telugu</option>
+          <option value="kn-IN">🇮🇳 Kannada</option>
+        </select>
+        <button class="btn-logout" onclick="logoutUser()">Sign Out</button>
+      </div>
+    </div>
+
+    <!-- ASSISTANT CHIPS BAR -->
+    <div class="assistant-bar">
+      <span class="assistant-label">Assistants:</span>
+      <div class="asst-chip active" data-q="property" onclick="quickAsk('1BHK available in Chennai?', this)">🏠 Property</div>
+      <div class="asst-chip" data-q="visit" onclick="quickAsk('Show my upcoming visits', this)">📅 Visits</div>
+      <div class="asst-chip" data-q="liked" onclick="quickAsk('Show my saved properties', this)">❤️ Saved</div>
+      <div class="asst-chip" data-q="message" onclick="quickAsk('Show my messages to owner', this)">💬 Messages</div>
+      <div class="asst-chip" data-q="roommate" onclick="quickAsk('Show my roommate preferences', this)">🤝 Roommate</div>
+      <div class="asst-chip" data-q="match" onclick="quickAsk('Find compatible roommates for me', this)">⚡ Match</div>
+      <div class="asst-chip" data-q="ad" onclick="quickAsk('Generate advertisement for my property', this)">📢 Advertise</div>
+      <div class="asst-chip" data-q="movein" onclick="quickAsk('Give me move-in tips', this)">📦 Move In</div>
+      <div class="asst-chip" data-q="subscription" onclick="quickAsk('Check my subscription plan', this)">💎 Plan</div>
+      <div class="asst-chip" data-q="compare" onclick="quickAsk('Compare my saved properties', this)">⚖️ Compare</div>
+    </div>
+
+    <!-- CHAT BODY -->
+    <div class="chat-body" id="chatBody">
+
+      <!-- Welcome card rendered by JS after login -->
+
+    </div>
+
+    <!-- FOOTER -->
+    <div class="chat-footer">
+
+      <!-- Quick suggestion chips -->
+      <div class="quick-chips">
+        <div class="q-chip" onclick="sendQuick('1BHK in Chennai under 15000')">🔍 1BHK Chennai</div>
+        <div class="q-chip" onclick="sendQuick('Show my upcoming visits')">📅 My Visits</div>
+        <div class="q-chip" onclick="sendQuick('Show my liked properties')">❤️ Saved</div>
+        <div class="q-chip" onclick="sendQuick('Find roommates for me')">🤝 Roommates</div>
+        <div class="q-chip" onclick="sendQuick('Compare my saved properties')">⚖️ Compare</div>
+      </div>
+
+      <div class="input-row">
+        <input
+          class="msg-input"
+          type="text"
+          id="textInput"
+          placeholder="Ask about properties, visits, roommates..."
+          onkeydown="if(event.key==='Enter') sendText()"
+        />
+        <button class="icon-btn btn-mic" id="micBtn" onclick="startVoice()" title="Voice Input">🎤</button>
+        <button class="icon-btn btn-send" onclick="sendText()" title="Send">➤</button>
+      </div>
+
+    </div>
+
+  </div>
+</div>
+
+<!-- ============================================================
+     SCRIPT
+============================================================ -->
+<script>
+
+/* ---------------------------------------------------------------
+   STATE
+--------------------------------------------------------------- */
+let currentUserId = null;
+let isRecording    = false;
+let currentAudio   = null;
+
+/* ---------------------------------------------------------------
+   TOAST
+--------------------------------------------------------------- */
+function showToast(msg, duration=2500){
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(()=> t.classList.remove('show'), duration);
+}
+
+/* ---------------------------------------------------------------
+   PAGE SWITCH
+--------------------------------------------------------------- */
+function showChat(){
+  document.getElementById('loginPage').classList.add('hidden');
+  document.getElementById('chatPage').classList.remove('hidden');
+}
+function showLogin(){
+  document.getElementById('chatPage').classList.add('hidden');
+  document.getElementById('loginPage').classList.remove('hidden');
+}
+
+/* ---------------------------------------------------------------
+   AUTO LOGIN
+--------------------------------------------------------------- */
+window.onload = async () => {
+  const savedId = sessionStorage.getItem('userId');
+  if(!savedId){ showLogin(); return; }
+
+  try{
+    const res  = await fetch('http://127.0.0.1:5000/check-user/' + savedId);
+    const data = await res.json();
+    if(data.exists){
+      currentUserId = savedId;
+      showChat();
+      renderWelcome();
+    } else {
+      sessionStorage.removeItem('userId');
+      showLogin();
+    }
+  } catch(e){
+    showLogin();
+  }
+};
+
+/* ---------------------------------------------------------------
+   REGISTER / LOGIN
+--------------------------------------------------------------- */
+async function registerUser(){
+  const name   = document.getElementById('name').value.trim();
+  const mobile = document.getElementById('mobile').value.trim();
+  const city   = document.getElementById('city').value.trim();
+
+  if(!name || !mobile || !city){
+    showToast('⚠️ Please fill all fields');
+    return;
+  }
+
+  const btn = document.getElementById('loginBtn');
+  btn.disabled = true;
+  btn.textContent = 'Please wait...';
+
+  try{
+    const res  = await fetch('http://127.0.0.1:5000/register',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({name, mobile, city})
+    });
+    const data = await res.json();
+
+    currentUserId = data.userId;
+    sessionStorage.setItem('userId', data.userId);
+
+    showToast('✅ Welcome to RentIT!');
+    showChat();
+    renderWelcome(name);
+
+  } catch(e){
+    showToast('❌ Server error. Please try again.');
+    btn.disabled = false;
+    btn.textContent = 'Open RentIT Assistant →';
+  }
+}
+
+/* ---------------------------------------------------------------
+   LOGOUT
+--------------------------------------------------------------- */
+function logoutUser(){
+  sessionStorage.removeItem('userId');
+  currentUserId = null;
+  document.getElementById('chatBody').innerHTML = '';
+  showLogin();
+  showToast('👋 Signed out successfully');
+}
+
+/* ---------------------------------------------------------------
+   WELCOME CARD
+--------------------------------------------------------------- */
+function renderWelcome(name=''){
+  const body = document.getElementById('chatBody');
+  body.innerHTML = '';
+
+  const greeting = name ? `Hello, ${name.split(' ')[0]}! 👋` : 'Welcome back! 👋';
+
+  const row = document.createElement('div');
+  row.className = 'msg-row bot';
+  row.innerHTML = `
+    <div class="msg-avatar">🏠</div>
+    <div>
+      <div class="welcome-card">
+        <h3>${greeting} I'm <span>RentIT</span></h3>
+        <div class="capability-grid">
+          <div class="cap-item"><span>🔍</span>Property Search</div>
+          <div class="cap-item"><span>📅</span>Visit Booking</div>
+          <div class="cap-item"><span>❤️</span>Saved Homes</div>
+          <div class="cap-item"><span>🤝</span>Roommate Match</div>
+          <div class="cap-item"><span>💬</span>Owner Messaging</div>
+          <div class="cap-item"><span>⚖️</span>Compare Homes</div>
+          <div class="cap-item"><span>📢</span>Advertise</div>
+          <div class="cap-item"><span>💎</span>Your Plan</div>
+        </div>
+      </div>
+      <div class="bubble-meta">${getTime()}</div>
+    </div>
+  `;
+  body.appendChild(row);
+  scrollBottom();
+}
+
+/* ---------------------------------------------------------------
+   APPEND MESSAGES
+--------------------------------------------------------------- */
+function appendUser(text){
+  const body = document.getElementById('chatBody');
+  const row  = document.createElement('div');
+  row.className = 'msg-row user';
+  row.innerHTML = `
+    <div class="msg-avatar">👤</div>
+    <div>
+      <div class="bubble">${escHtml(text)}</div>
+      <div class="bubble-meta">${getTime()}</div>
+    </div>
+  `;
+  body.appendChild(row);
+  scrollBottom();
+}
+
+function appendBot(text, audioUrl=null, assistantType=''){
+  const body    = document.getElementById('chatBody');
+  const typingRow = document.getElementById('typingRow');
+  if(typingRow) typingRow.remove();
+
+  const row = document.createElement('div');
+  row.className = 'msg-row bot';
+
+  let audioHtml = '';
+  if(audioUrl){
+    audioHtml = `<div class="audio-btn" onclick="playAudio('${audioUrl}')">
+      🔊 Play Voice Reply
+    </div>`;
+  }
+
+  let tagHtml = '';
+  if(assistantType){
+    tagHtml = `<span class="assistant-tag">${assistantLabel(assistantType)}</span>`;
+  }
+
+  row.innerHTML = `
+    <div class="msg-avatar">🏠</div>
+    <div>
+      <div class="bubble">${escHtml(text)}${audioHtml}</div>
+      <div class="bubble-meta">${tagHtml} ${getTime()}</div>
+    </div>
+  `;
+  body.appendChild(row);
+  scrollBottom();
+}
+
+function showTyping(){
+  const body = document.getElementById('chatBody');
+  const row  = document.createElement('div');
+  row.className = 'msg-row bot';
+  row.id = 'typingRow';
+  row.innerHTML = `
+    <div class="msg-avatar">🏠</div>
+    <div class="typing-indicator">
+      <div class="typing-dot"></div>
+      <div class="typing-dot"></div>
+      <div class="typing-dot"></div>
+    </div>
+  `;
+  body.appendChild(row);
+  scrollBottom();
+}
+
+/* ---------------------------------------------------------------
+   SEND MESSAGE
+--------------------------------------------------------------- */
+async function sendMessage(text){
+  if(!text.trim()) return;
+  appendUser(text);
+  showTyping();
+
+  try{
+    const res  = await fetch('http://127.0.0.1:5000/voice-reply',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({userId: currentUserId, message: text})
+    });
+    const data = await res.json();
+
+    if(data.error){
+      appendBot('⚠️ ' + data.error);
+      return;
+    }
+
+    const audioUrl = data.audio
+      ? 'http://127.0.0.1:5000' + data.audio
+      : null;
+
+    appendBot(data.reply, audioUrl, data.assistant);
+
+    // auto-play voice
+    if(audioUrl) playAudio(audioUrl);
+
+    // highlight matching assistant chip
+    if(data.assistant) highlightChip(data.assistant);
+
+  } catch(e){
+    const typingRow = document.getElementById('typingRow');
+    if(typingRow) typingRow.remove();
+    appendBot('⚠️ Could not reach server. Please check your connection.');
+  }
+}
+
+function sendText(){
+  const inp = document.getElementById('textInput');
+  const txt = inp.value.trim();
+  if(!txt) return;
+  inp.value = '';
+  sendMessage(txt);
+}
+
+function sendQuick(text){
+  sendMessage(text);
+}
+
+function quickAsk(text, el){
+  // highlight chip
+  document.querySelectorAll('.asst-chip').forEach(c => c.classList.remove('active'));
+  el.classList.add('active');
+  sendMessage(text);
+}
+
+/* ---------------------------------------------------------------
+   VOICE INPUT
+--------------------------------------------------------------- */
+function startVoice(){
+  const micBtn = document.getElementById('micBtn');
+  const lang   = document.getElementById('langSelect').value;
+
+  if(isRecording){ return; }
+
+  const SpeechRecognition =
+    window.SpeechRecognition || window.webkitSpeechRecognition;
+
+  if(!SpeechRecognition){
+    showToast('❌ Voice not supported in this browser');
+    return;
+  }
+
+  const recognition = new SpeechRecognition();
+  recognition.lang            = lang;
+  recognition.continuous      = false;
+  recognition.interimResults  = false;
+
+  recognition.onstart = () => {
+    isRecording = true;
+    micBtn.classList.add('recording');
+    micBtn.textContent = '⏹';
+    showToast('🎤 Listening...');
+  };
+
+  recognition.onresult = e => {
+    const text = e.results[0][0].transcript;
+    document.getElementById('textInput').value = text;
+    sendMessage(text);
+  };
+
+  recognition.onerror = e => {
+    showToast('❌ Voice error: ' + e.error);
+  };
+
+  recognition.onend = () => {
+    isRecording = false;
+    micBtn.classList.remove('recording');
+    micBtn.textContent = '🎤';
+  };
+
+  recognition.start();
+}
+
+/* ---------------------------------------------------------------
+   AUDIO PLAYBACK
+--------------------------------------------------------------- */
+function playAudio(url){
+  if(currentAudio){
+    currentAudio.pause();
+    currentAudio = null;
+  }
+  currentAudio = new Audio(url);
+  currentAudio.play().catch(()=>{});
+}
+
+/* ---------------------------------------------------------------
+   ASSISTANT CHIP HIGHLIGHT
+--------------------------------------------------------------- */
+function highlightChip(type){
+  document.querySelectorAll('.asst-chip').forEach(c => {
+    c.classList.toggle('active', c.dataset.q === type);
+  });
+}
+
+/* ---------------------------------------------------------------
+   HELPERS
+--------------------------------------------------------------- */
+function scrollBottom(){
+  const body = document.getElementById('chatBody');
+  body.scrollTop = body.scrollHeight;
+}
+
+function getTime(){
+  return new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+}
+
+function escHtml(str){
+  return str
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/\n/g,'<br>');
+}
+
+function assistantLabel(type){
+  const map = {
+    property:'🏠 Property Search',
+    visit:'📅 Visits',
+    liked:'❤️ Saved',
+    message:'💬 Messages',
+    roommate:'🤝 Roommate',
+    match:'⚡ Match',
+    ad:'📢 Advertise',
+    movein:'📦 Move In',
+    subscription:'💎 Plan',
+    compare:'⚖️ Compare'
+  };
+  return map[type] || type;
+}
+
+</script>
+</body>
+</html>
