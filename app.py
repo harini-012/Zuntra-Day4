@@ -172,6 +172,15 @@ def voice_reply():
             "cancel visit",
             "next visit",
             "upcoming visit"
+            "मुलाकात", "भेंट", "विज़िट", "अपॉइंटमेंट",
+    "मेरी विज़िट", "आगामी विज़िट", "विज़िट रद्द", "कन्फर्म विज़िट",
+     "சந்திப்பு", "பார்வை", "விசிட்", "என் விசிட்",
+    "அடுத்த விசிட்", "வரவிருக்கும் விசிட்", "ரத்து செய் விசிட்",
+    "உறுதி செய்யப்பட்ட விசிட்",
+    "సందర్శన", "విజిట్", "నా విజిట్స్", "తదుపరి విజిట్",
+    "రద్దు విజిట్", "నిర్ధారిత విజిట్", "రాబోయే విజిట్",
+     "ಭೇಟಿ", "ವಿಜಿಟ್", "ನನ್ನ ಭೇಟಿಗಳು", "ಮುಂದಿನ ಭೇಟಿ",
+    "ರದ್ದು ಭೇಟಿ", "ದೃಢೀಕೃತ ಭೇಟಿ", "ಬರುವ ಭೇಟಿ"
 
         ]
 
@@ -185,7 +194,13 @@ def voice_reply():
             # CANCEL VISIT
             # =====================================
 
-            if "cancel" in msg.lower():
+            if (
+    "cancel" in msg.lower()
+    or "ரத்து" in msg
+    or "रद्द" in msg
+    or "రద్దు" in msg
+    or "ರದ್ದು" in msg
+):
 
                 cursor.execute("""
 
@@ -215,7 +230,13 @@ def voice_reply():
             # CONFIRMED VISITS
             # =====================================
 
-            elif "confirmed" in msg.lower():
+            elif  (
+    "confirmed" in msg.lower()
+    or "உறுதி" in msg
+    or "कन्फर्म" in msg
+    or "నిర్ధారిత" in msg
+    or "ದೃಢೀಕೃತ" in msg
+):
 
                 cursor.execute("""
 
@@ -263,7 +284,17 @@ Status: {r[5]}
             # NEXT VISIT
             # =====================================
 
-            elif "next" in msg.lower() or "upcoming" in msg.lower():
+            elif  (
+    "next" in msg.lower()
+    or "upcoming" in msg.lower()
+    or "அடுத்த" in msg
+    or "வரவிருக்கும்" in msg
+    or "आगामी" in msg
+    or "తదుపరి" in msg
+    or "రాబోయే" in msg
+    or "ಮುಂದಿನ" in msg
+    or "ಬರುವ" in msg
+):
 
                 cursor.execute("""
 
